@@ -1,0 +1,18 @@
+[app]
+name="ImmoLux"
+version="1.0.0-alpha"
+
+[server]
+host = "localhost"
+port = 8080
+enable_pre_fork = false
+origin="http://localhost:8080/"
+
+[logging]
+server_log_level="TRACE"
+database_log_level="TRACE"
+log_dir="./logs"
+
+[database]
+max_idle_connections=50
+max_open_connections=50
