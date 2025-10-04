@@ -40,3 +40,4 @@ dataSources.xml
 
 #Database
 CreateDB.bat
+*.db
