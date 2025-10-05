@@ -61,17 +61,17 @@ func (s *Server) Listen() error {
 
 func (s *Server) Get(path string, handler RouteHandler) {
 	s.fiber.Get(path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(&ctx, handler)
+		return s.handleRoute(ctx, handler)
 	})
 }
 
 func (s *Server) Post(path string, handler RouteHandler) {
 	s.fiber.Post(path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(&ctx, handler)
+		return s.handleRoute(ctx, handler)
 	})
 }
 
-func (s *Server) handleRoute(ctx *fiber.Ctx, handler RouteHandler) error {
+func (s *Server) handleRoute(ctx fiber.Ctx, handler RouteHandler) error {
 	routeContext, err := routes.GetRouteContext(ctx, s.db)
 	if err != nil {
 		return err

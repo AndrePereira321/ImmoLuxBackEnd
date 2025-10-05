@@ -11,12 +11,12 @@ type UserContext struct {
 	sessionId uint64
 }
 type RouteContext struct {
-	ctx         *fiber.Ctx
+	ctx         fiber.Ctx
 	userContext *UserContext
 	db          *database.Database
 }
 
-func GetRouteContext(ctx *fiber.Ctx, db *database.Database) (*RouteContext, error) {
+func GetRouteContext(ctx fiber.Ctx, db *database.Database) (*RouteContext, error) {
 	//TODO Retrieve user context from DB
 	return &RouteContext{
 		ctx:         ctx,
@@ -27,13 +27,12 @@ func GetRouteContext(ctx *fiber.Ctx, db *database.Database) (*RouteContext, erro
 
 // TODO Temporary
 func (route *RouteContext) Respond(obj any) error {
-	c := *route.ctx
-	err := c.JSON(obj)
+	err := route.ctx.JSON(obj)
 	if err != nil {
 		return err
 	}
 
-	return c.SendStatus(200)
+	return route.ctx.SendStatus(200)
 }
 
 func (route *RouteContext) DbPing() bool {
