@@ -31,6 +31,14 @@ func GetRouteContext(logger *logger.Logger, ctx fiber.Ctx, db *database.Database
 	}, nil
 }
 
+func (route *RouteContext) Logger() *logger.Logger {
+	return route.logger
+}
+
+func (route *RouteContext) Db() *database.Database {
+	return route.db
+}
+
 func (route *RouteContext) BadRequest(msg string) error {
 	return route.RespondError(fiber.StatusBadRequest, "BAD_REQUEST", msg)
 }
@@ -58,8 +66,4 @@ func (route *RouteContext) ReadBody(body any) error {
 		return server_error.Wrap("ROUTE_HANDLER", "failed to read body", err)
 	}
 	return nil
-}
-
-func (route *RouteContext) DbPing() bool {
-	return route.db.Ping()
 }

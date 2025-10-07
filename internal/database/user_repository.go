@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
+	"immo-lux/internal/utils"
 	"strings"
 	"time"
 
@@ -130,6 +131,9 @@ func (rep *UserRepository) validateUserInput(user *models.UserDTO, password stri
 	}
 	if user.Email == "" {
 		return server_error.New("USER_VALIDATION", "email is required")
+	}
+	if !utils.IsValidEmail(user.Email) {
+		return server_error.New("USER_VALIDATION", "invalid email")
 	}
 	if password == "" {
 		return server_error.New("USER_VALIDATION", "password is required")

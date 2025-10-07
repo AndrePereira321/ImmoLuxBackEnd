@@ -1,9 +1,15 @@
 package routes
 
+type PingResponse struct {
+	Status int `json:"status"`
+}
+
 func Ping(ctx *RouteContext) error {
-	status := 0
-	if ctx.DbPing() {
-		status = 1
+	response := &PingResponse{
+		Status: 0,
 	}
-	return ctx.RespondData(map[string]int{"status": status})
+	if ctx.Db().Ping() {
+		response.Status = 1
+	}
+	return ctx.RespondData(response)
 }
