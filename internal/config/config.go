@@ -2,8 +2,9 @@ package config
 
 import (
 	"bytes"
-	"github.com/spf13/viper"
 	"immo-lux/internal/server_error"
+
+	"github.com/spf13/viper"
 )
 
 type ServerConfig struct {
@@ -66,8 +67,9 @@ func (s *HttpConfig) Origin() string {
 }
 
 type DatabaseConfig struct {
-	maxOpenCons int
-	maxIdleCons int
+	maxOpenCons  int
+	maxIdleCons  int
+	userFilePath string
 }
 
 func (d *DatabaseConfig) MaxOpenCons() int {
@@ -76,6 +78,10 @@ func (d *DatabaseConfig) MaxOpenCons() int {
 
 func (d *DatabaseConfig) MaxIdleCons() int {
 	return d.maxIdleCons
+}
+
+func (d *DatabaseConfig) UserFilePath() string {
+	return d.userFilePath
 }
 
 type LoggingConfig struct {
@@ -180,6 +186,8 @@ func getDatabaseConfig(v *viper.Viper) (*DatabaseConfig, error) {
 	if databaseConfig.maxIdleCons <= 0 {
 		databaseConfig.maxIdleCons = 25
 	}
+
+	databaseConfig.userFilePath = v.GetString("database.user_file_path")
 
 	return &databaseConfig, nil
 }

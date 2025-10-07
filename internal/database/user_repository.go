@@ -1,10 +1,9 @@
-package repositories
+package database
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"immo-lux/internal/database"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
 	"strings"
@@ -14,42 +13,35 @@ import (
 )
 
 type UserRepository struct {
-	db *database.Database
+	db *Database
 }
 
-func NewUserRepository(db *database.Database) *UserRepository {
+func NewUserRepository(db *Database) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-func (rep *UserRepository) CreateUser(user *models.UserDTO, password string) (models.RecordId, error) {
+func (rep *UserRepository) CreateUser(ctx context.Context, tx *sql.Tx, user *models.UserDTO, password string) (models.RecordId, error) {
 	if err := rep.validateUserInput(user, password); err != nil {
-		return 0, err
-	}
-
-	hashedPassword, err := rep.hashPassword(password)
-	if err != nil {
-		return 0, err
+		return models.InvalidRecordId, err
 	}
 
 	now := time.Now()
-	var userId models.RecordId
-	err = rep.db.WithTransaction(func(ctx context.Context, tx *sql.Tx) error {
-
-		userId, err = rep.insertUser(ctx, tx, user, now)
-		if err != nil {
-			rep.db.Logger().Warn(fmt.Sprintf("Error inserting user: %s", err.Error()))
-			return err
-		}
-
-		if err = rep.insertUserAuth(ctx, tx, userId, hashedPassword, now); err != nil {
-			rep.db.Logger().Warn(fmt.Sprintf("Error inserting user authentication: %s", err.Error()))
-			return err
-		}
-
-		return nil
-	})
+	hashedPassword, err := rep.hashPassword(password)
 	if err != nil {
-		return 0, err
+		return models.InvalidRecordId, err
+	}
+
+	rep.db.Logger().Debug(fmt.Sprintf("Inserting user %s", user.Email))
+
+	userId, err := rep.insertUser(ctx, tx, user, now)
+	if err != nil {
+		rep.db.Logger().Warn(fmt.Sprintf("Error inserting user: %s", err.Error()))
+		return models.InvalidRecordId, err
+	}
+
+	if err = rep.insertUserAuth(ctx, tx, userId, hashedPassword, now); err != nil {
+		rep.db.Logger().Warn(fmt.Sprintf("Error inserting user authentication: %s", err.Error()))
+		return models.InvalidRecordId, err
 	}
 
 	user.ID = userId
@@ -59,23 +51,30 @@ func (rep *UserRepository) CreateUser(user *models.UserDTO, password string) (mo
 	return userId, nil
 }
 
-func (rep *UserRepository) UserExists(email string) (bool, error) {
-	query := `SELECT EXISTS(SELECT 1 FROM user WHERE email = ?)`
+func (rep *UserRepository) GetUserID(email string) (models.RecordId, error) {
+	query := `SELECT id FROM user WHERE email = ?`
 	rows, err := rep.db.Query(query, email)
 	if err != nil {
-		return false, server_error.Wrap("USER_REPOSITORY", "failed executing user exists query", err)
+		return models.InvalidRecordId, server_error.Wrap("USER_REPOSITORY", "failed executing user exists query", err)
 	}
 	defer rows.Close()
 	if !rows.Next() {
-		return false, server_error.New("USER_REPOSITORY", "failed to check if user exists")
+		return models.InvalidRecordId, server_error.New("USER_REPOSITORY", "failed to check if user exists")
 	}
-	var exists bool
-	err = rows.Scan(&exists)
+	var recordId models.RecordId
+	err = rows.Scan(&recordId)
 	if err != nil {
-		return false, server_error.Wrap("USER_REPOSITORY", "failed scanning db user exists", err)
+		return models.InvalidRecordId, server_error.Wrap("USER_REPOSITORY", "failed scanning db user exists", err)
 	}
-	return exists, nil
+	return recordId, nil
+}
 
+func (rep *UserRepository) UserExists(email string) (bool, error) {
+	userId, err := rep.GetUserID(email)
+	if err != nil {
+		return false, err
+	}
+	return userId.IsValid(), nil
 }
 
 func (rep *UserRepository) insertUser(ctx context.Context, tx *sql.Tx, user *models.UserDTO, now time.Time) (models.RecordId, error) {
@@ -92,27 +91,26 @@ func (rep *UserRepository) insertUser(ctx context.Context, tx *sql.Tx, user *mod
 	)
 	if err != nil {
 		if isUniqueConstraintError(err) {
-			return 0, server_error.Wrap("USER_ALREADY_EXISTS", "user with this email already exists", err)
+			return models.UnknownRecordId, server_error.Wrap("USER_ALREADY_EXISTS", "user with this email already exists", err)
 		}
-		return 0, server_error.Wrap("USER_INSERT", "failed to insert user", err)
+		return models.InvalidRecordId, server_error.Wrap("USER_INSERT", "failed to insert user", err)
 	}
 
 	userId, err := result.LastInsertId()
 	if err != nil {
-		return 0, server_error.Wrap("USER_INSERT", "failed to get user ID", err)
+		return models.InvalidRecordId, server_error.Wrap("USER_INSERT", "failed to get user ID", err)
 	}
 
 	return models.RecordId(userId), nil
 }
 
 func (rep *UserRepository) insertUserAuth(ctx context.Context, tx *sql.Tx, userId models.RecordId, hashedPassword string, now time.Time) error {
-	query := `INSERT INTO user_auth (user_id, hash, is_locked, failed_login_attempts, password_changed_at, created_at, updated_at)
-	          VALUES (?, ?, 0, 0, ?, ?, ?)`
+	query := `INSERT INTO user_auth (user_id, hash, is_locked, failed_login_attempts, created_at, updated_at)
+	          VALUES (?, ?, 0, 0, ?, ?)`
 
 	_, err := tx.ExecContext(ctx, query,
 		userId,
 		hashedPassword,
-		now,
 		now,
 		now,
 	)

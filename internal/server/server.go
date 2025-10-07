@@ -31,6 +31,10 @@ func New(serverConfig *config.ServerConfig) (*Server, error) {
 		return nil, server_error.Wrap("SERVER_INIT", "failed creating database", err)
 	}
 
+	if err = db.Init(); err != nil {
+		return nil, server_error.Wrap("SERVER_INIT", "failed initializing database", err)
+	}
+
 	fiberApp := getFiberApp(serverConfig)
 
 	if serverConfig.HttpServer().Origin() != "" {

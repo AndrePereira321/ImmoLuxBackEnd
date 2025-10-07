@@ -16,3 +16,4 @@ log_dir="./logs"
 [database]
 max_idle_connections=50
 max_open_connections=50
+user_file_path = "configs/standardUserList.json"

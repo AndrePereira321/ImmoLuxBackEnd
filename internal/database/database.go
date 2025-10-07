@@ -8,6 +8,7 @@ import (
 	"immo-lux/internal/config"
 	"immo-lux/internal/logger"
 	"immo-lux/internal/server_error"
+	"immo-lux/internal/utils"
 	"net/url"
 	"os"
 
@@ -16,8 +17,9 @@ import (
 )
 
 type Database struct {
-	db     *sql.DB
-	logger *logger.Logger
+	serverConfig *config.ServerConfig
+	db           *sql.DB
+	logger       *logger.Logger
 }
 
 func New(serverConfig *config.ServerConfig) (*Database, error) {
@@ -54,13 +56,27 @@ func New(serverConfig *config.ServerConfig) (*Database, error) {
 	dbLogger.Info("Database successfully initialized.")
 
 	return &Database{
-		db:     db,
-		logger: dbLogger,
+		serverConfig: serverConfig,
+		db:           db,
+		logger:       dbLogger,
 	}, nil
 }
 
 func (db *Database) Logger() *logger.Logger {
 	return db.logger
+}
+
+func (db *Database) Init() error {
+	err := db.initUsers()
+	if err != nil {
+		db.logger.Warn(fmt.Sprintf("Failed to initialize users. Error: %s", err.Error()))
+		return err
+	}
+	return nil
+}
+
+func (db *Database) NewUserRepository() *UserRepository {
+	return NewUserRepository(db)
 }
 
 func (db *Database) WithTransaction(fn func(ctx context.Context, tx *sql.Tx) error) error {
@@ -157,4 +173,39 @@ func upgradeStructure(serverConfig *config.ServerConfig, dbLogger *logger.Logger
 
 func (db *Database) Ping() bool {
 	return db.db.Ping() == nil
+}
+
+func (db *Database) initUsers() error {
+	standardUsersFilePath := db.serverConfig.Database().UserFilePath()
+	standardUsers := utils.ReadStandardUsers(standardUsersFilePath)
+	if len(standardUsers) == 0 {
+		return nil
+	}
+
+	userRepository := db.NewUserRepository()
+	err := db.WithTransaction(func(ctx context.Context, tx *sql.Tx) error {
+		for _, standardUser := range standardUsers {
+			existsResult, err := tx.Query("SELECT 1 FROM user WHERE email = ?", standardUser.Email)
+			if err != nil {
+				db.logger.Warn(fmt.Sprintf("Error checking if user %s already exists. Error: [%s]", standardUser.Email, err.Error()))
+				return server_error.Wrap("DB_INIT_USERS", fmt.Sprintf("error checking if user [%s] already exists", standardUser.Email), err)
+			}
+			if existsResult.Next() {
+				db.Logger().Debug(fmt.Sprintf("Skipping standard user. User %s already exists", standardUser.Email))
+				continue
+			}
+			_ = existsResult.Close()
+			userDto := standardUser.ToUserDTO(true)
+			userId, err := userRepository.CreateUser(ctx, tx, userDto, standardUser.Password)
+			if err != nil {
+				return err
+			}
+			db.Logger().Debug(fmt.Sprintf("Created user %s with id %d", userDto.Email, userId))
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
