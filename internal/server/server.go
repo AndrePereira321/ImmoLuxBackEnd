@@ -11,6 +11,7 @@ import (
 	"immo-lux/internal/server_error"
 	"strconv"
 
+	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 )
@@ -141,7 +142,9 @@ func (s *Server) Close() []error {
 
 func getFiberApp(serverConfig *config.ServerConfig) *fiber.App {
 	return fiber.New(fiber.Config{
-		AppName: serverConfig.AppConfig().Name(),
+		AppName:     serverConfig.AppConfig().Name(),
+		JSONEncoder: json.Marshal,
+		JSONDecoder: json.Unmarshal,
 	})
 }
 
