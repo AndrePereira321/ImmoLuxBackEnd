@@ -3,6 +3,7 @@ package server_error
 import (
 	"errors"
 	"fmt"
+	"immo-lux/internal/models"
 )
 
 type ServerError struct {
@@ -36,6 +37,13 @@ func (e *ServerError) Is(target error) bool {
 		return e.Code == other.Code && e.Message == other.Message && errors.Is(e.Cause, other.Cause)
 	}
 	return false
+}
+
+func (e *ServerError) ToServerAPIError() *models.ServerAPIError {
+	return &models.ServerAPIError{
+		Code:    e.Code,
+		Message: e.Message,
+	}
 }
 
 func (e *ServerError) String() string {

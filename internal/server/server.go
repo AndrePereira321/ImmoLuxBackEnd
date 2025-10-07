@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"immo-lux/internal/config"
 	"immo-lux/internal/database"
 	"immo-lux/internal/logger"
+	"immo-lux/internal/models"
 	"immo-lux/internal/server/routes"
 	"immo-lux/internal/server_error"
 	"strconv"
@@ -76,11 +78,29 @@ func (s *Server) Post(path string, handler RouteHandler) {
 }
 
 func (s *Server) handleRoute(ctx fiber.Ctx, handler RouteHandler) error {
-	routeContext, err := routes.GetRouteContext(ctx, s.db)
+	routeContext, err := routes.GetRouteContext(s.logger, ctx, s.db)
 	if err != nil {
 		return err
 	}
-	return handler(routeContext)
+
+	err = handler(routeContext)
+	if err != nil {
+		return handleServerError(routeContext, err)
+	}
+
+	return nil
+}
+
+func handleServerError(ctx *routes.RouteContext, err error) error {
+	var serverError *server_error.ServerError
+	apiResponse := models.NewServerAPIResponse(false, nil, nil)
+	if errors.As(err, &serverError) {
+		apiResponse.Error = serverError.ToServerAPIError()
+	} else {
+		apiResponse.Error = models.NewServerAPIError("SERVER_ERROR", err.Error())
+	}
+
+	return ctx.Respond(fiber.StatusInternalServerError, apiResponse)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

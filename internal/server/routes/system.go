@@ -5,5 +5,5 @@ func Ping(ctx *RouteContext) error {
 	if ctx.DbPing() {
 		status = 1
 	}
-	return ctx.Respond(map[string]int{"status": status})
+	return ctx.RespondData(map[string]int{"status": status})
 }
