@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
@@ -45,9 +46,9 @@ func (rep *UserRepository) CreateUser(ctx context.Context, tx *sql.Tx, user *mod
 		return models.InvalidRecordId, err
 	}
 
-	user.ID = userId
-	user.CreatedAt = now
-	user.UpdatedAt = now
+	user.ID = &userId
+	user.CreatedAt = &now
+	user.UpdatedAt = &now
 
 	return userId, nil
 }
@@ -76,6 +77,62 @@ func (rep *UserRepository) UserExists(email string) (bool, error) {
 		return false, err
 	}
 	return userId.IsValid(), nil
+}
+
+func (rep *UserRepository) GetUserAuth(email string) (*models.UserDTO, *models.UserAuthDTO, error) {
+	query := `
+		SELECT usr.id,
+			   usr.first_name,
+			   usr.last_name,
+			   usr.email,
+			   usr.is_active,
+			   usr.created_at,
+			   usr.updated_at,
+			   uah.id AS user_auth_id,
+			   uah.user_id,
+			   uah.hash,
+			   uah.is_locked,
+			   uah.locked_reason,
+			   uah.failed_login_attempts,
+			   uah.last_failed_attempt,
+			   uah.password_changed_at,
+			   uah.updated_at AS user_auth_updated_at,
+			   uah.created_at AS user_auth_created_at
+		FROM user usr
+				 JOIN user_auth uah ON uah.user_id = usr.id
+		WHERE usr.email = ?;
+	`
+
+	var user models.UserDTO
+	var userAuth models.UserAuthDTO
+	err := rep.db.QueryRow(query, email).Scan(
+		&user.ID,
+		&user.FirstName,
+		&user.LastName,
+		&user.Email,
+		&user.IsActive,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+		&userAuth.ID,
+		&userAuth.UserID,
+		&userAuth.Hash,
+		&userAuth.IsLocked,
+		&userAuth.LockedReason,
+		&userAuth.FailedLoginAttempts,
+		&userAuth.LastFailedLogin,
+		&userAuth.PasswordChangedAt,
+		&userAuth.UpdatedAt,
+		&userAuth.CreatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, server_error.New("USER_NOT_FOUND", fmt.Sprintf("user not found: %s", email))
+		}
+		return nil, nil, server_error.Wrap("USER_REPOSITORY", "failed scanning user auth data", err)
+	}
+
+	return &user, &userAuth, nil
 }
 
 func (rep *UserRepository) insertUser(ctx context.Context, tx *sql.Tx, user *models.UserDTO, now time.Time) (models.RecordId, error) {
@@ -123,16 +180,16 @@ func (rep *UserRepository) insertUserAuth(ctx context.Context, tx *sql.Tx, userI
 }
 
 func (rep *UserRepository) validateUserInput(user *models.UserDTO, password string) error {
-	if user.FirstName == "" {
+	if *user.FirstName == "" {
 		return server_error.New("USER_VALIDATION", "first name is required")
 	}
-	if user.LastName == "" {
+	if *user.LastName == "" {
 		return server_error.New("USER_VALIDATION", "last name is required")
 	}
-	if user.Email == "" {
+	if *user.Email == "" {
 		return server_error.New("USER_VALIDATION", "email is required")
 	}
-	if !utils.IsValidEmail(user.Email) {
+	if !utils.IsValidEmail(*user.Email) {
 		return server_error.New("USER_VALIDATION", "invalid email")
 	}
 	if password == "" {

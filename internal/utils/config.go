@@ -15,10 +15,10 @@ type StandardUser struct {
 
 func (u *StandardUser) ToUserDTO(isActive bool) *models.UserDTO {
 	return &models.UserDTO{
-		FirstName: u.FirstName,
-		LastName:  u.LastName,
-		Email:     u.Email,
-		IsActive:  isActive,
+		FirstName: &u.FirstName,
+		LastName:  &u.LastName,
+		Email:     &u.Email,
+		IsActive:  &isActive,
 	}
 }
 

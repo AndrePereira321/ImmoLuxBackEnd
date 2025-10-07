@@ -1,5 +1,7 @@
 package models
 
+const PasswordMinLength = 4
+
 type ServerAPIResponse struct {
 	Success bool            `json:"success"`
 	Data    any             `json:"data"`

@@ -112,6 +112,11 @@ func (db *Database) Query(query string, args ...any) (*sql.Rows, error) {
 	return rows, nil
 }
 
+func (db *Database) QueryRow(query string, args ...any) *sql.Row {
+	ctx := context.Background()
+	return db.db.QueryRowContext(ctx, query, args...)
+}
+
 func (db *Database) Close() error {
 	err := db.db.Close()
 	if err != nil {
