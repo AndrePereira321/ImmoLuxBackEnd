@@ -6,5 +6,5 @@ type RouteHandler func(ctx *routes.RouteContext) error
 
 func (s *Server) RegisterRoutes() {
 	s.Get("/ping", routes.Ping)
-	s.Post("/register", routes.RegisterUser)
+	s.Post("/login", routes.Login)
 }

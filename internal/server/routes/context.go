@@ -2,6 +2,7 @@ package routes
 
 import (
 	"immo-lux/internal/database"
+	"immo-lux/internal/server_error"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -33,6 +34,14 @@ func (route *RouteContext) Respond(obj any) error {
 	}
 
 	return route.ctx.SendStatus(200)
+}
+
+func (route *RouteContext) ReadBody(body any) error {
+	err := route.ctx.Bind().JSON(body)
+	if err != nil {
+		return server_error.Wrap("ROUTE_HANDLER", "failed to read body", err)
+	}
+	return nil
 }
 
 func (route *RouteContext) DbPing() bool {
