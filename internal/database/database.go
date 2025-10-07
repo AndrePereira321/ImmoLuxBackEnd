@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -58,12 +59,49 @@ func New(serverConfig *config.ServerConfig) (*Database, error) {
 	}, nil
 }
 
-func (d *Database) Close() error {
-	err := d.db.Close()
+func (db *Database) Logger() *logger.Logger {
+	return db.logger
+}
+
+func (db *Database) WithTransaction(fn func(ctx context.Context, tx *sql.Tx) error) error {
+	ctx := context.Background()
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return server_error.Wrap("DB_TX", "failed to start transaction", err)
+	}
+
+	err = fn(ctx, tx)
+	if err != nil {
+		db.logger.Warn(fmt.Sprintf("Error during transaction. Rolling back. Error: [%s]", err.Error()))
+		_ = tx.Rollback()
+		return err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		db.logger.Warn(fmt.Sprintf("Error during transaction commit. Error: [%s]", err.Error()))
+		_ = tx.Rollback()
+		return server_error.Wrap("DB_TX", "error commiting transaction", err)
+	}
+	return nil
+}
+
+func (db *Database) Query(query string, args ...any) (*sql.Rows, error) {
+	ctx := context.Background()
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		db.logger.Warn(fmt.Sprintf("Error during query. Error: [%s]", err.Error()))
+		return nil, server_error.Wrap("DB_QUERY", "error when executing query", err)
+	}
+	return rows, nil
+}
+
+func (db *Database) Close() error {
+	err := db.db.Close()
 	if err != nil {
 		return server_error.Wrap("DB_CLOSE", "error when closing database", err)
 	}
-	return d.logger.Close()
+	return db.logger.Close()
 }
 
 //go:embed migrations/*.sql
