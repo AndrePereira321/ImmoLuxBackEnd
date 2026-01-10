@@ -16,6 +16,8 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/cors"
 )
 
+const ApiPrefix = "/v1/api"
+
 type Server struct {
 	config *config.ServerConfig
 	fiber  *fiber.App
@@ -67,13 +69,13 @@ func (s *Server) Listen() error {
 }
 
 func (s *Server) Get(path string, handler RouteHandler) {
-	s.fiber.Get(path, func(ctx fiber.Ctx) error {
+	s.fiber.Get(ApiPrefix+path, func(ctx fiber.Ctx) error {
 		return s.handleRoute(ctx, handler)
 	})
 }
 
 func (s *Server) Post(path string, handler RouteHandler) {
-	s.fiber.Post(path, func(ctx fiber.Ctx) error {
+	s.fiber.Post(ApiPrefix+path, func(ctx fiber.Ctx) error {
 		return s.handleRoute(ctx, handler)
 	})
 }

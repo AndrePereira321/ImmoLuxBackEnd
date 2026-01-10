@@ -49,6 +49,7 @@ type HttpConfig struct {
 	port          uint
 	enablePreFork bool
 	origin        string
+	spaFolder     string
 }
 
 func (s *HttpConfig) Host() string {
@@ -65,6 +66,10 @@ func (s *HttpConfig) EnablePreFork() bool {
 
 func (s *HttpConfig) Origin() string {
 	return s.origin
+}
+
+func (s *HttpConfig) SpaFolder() string {
+	return s.spaFolder
 }
 
 type DatabaseConfig struct {
@@ -188,6 +193,7 @@ func getHttpConfig(v *viper.Viper) (*HttpConfig, error) {
 
 	httpConfig.enablePreFork = v.GetBool("server.enable_pre_fork")
 	httpConfig.origin = v.GetString("server.origin")
+	httpConfig.spaFolder = v.GetString("server.spaFolder")
 
 	return &httpConfig, nil
 }
