@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"fmt"
 	"immo-lux/internal/server_error"
 
 	"github.com/spf13/viper"
@@ -70,6 +71,12 @@ type DatabaseConfig struct {
 	maxOpenCons  int
 	maxIdleCons  int
 	userFilePath string
+	host         string
+	port         int
+	username     string
+	password     string
+	dbName       string
+	sslMode      string
 }
 
 func (d *DatabaseConfig) MaxOpenCons() int {
@@ -82,6 +89,35 @@ func (d *DatabaseConfig) MaxIdleCons() int {
 
 func (d *DatabaseConfig) UserFilePath() string {
 	return d.userFilePath
+}
+
+func (d *DatabaseConfig) Host() string {
+	return d.host
+}
+
+func (d *DatabaseConfig) Port() int {
+	return d.port
+}
+
+func (d *DatabaseConfig) Username() string {
+	return d.username
+}
+
+func (d *DatabaseConfig) Password() string {
+	return d.password
+}
+
+func (d *DatabaseConfig) DbName() string {
+	return d.dbName
+}
+
+func (d *DatabaseConfig) SslMode() string {
+	return d.sslMode
+}
+
+func (d *DatabaseConfig) ConnectionString() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		d.username, d.password, d.host, d.port, d.dbName, d.sslMode)
 }
 
 type LoggingConfig struct {
@@ -110,29 +146,29 @@ func GetServerConfig(data []byte) (*ServerConfig, error) {
 		return nil, server_error.Wrap("CONFIG_PARSER", "error when reading config data", err)
 	}
 
-	if appConfig, err := getAppConfig(v); err != nil {
+	appConfig, err := getAppConfig(v)
+	if err != nil {
 		return nil, err
-	} else {
-		serverConfig.appConfig = appConfig
 	}
+	serverConfig.appConfig = appConfig
 
-	if httpConfig, err := getHttpConfig(v); err != nil {
+	httpConfig, err := getHttpConfig(v)
+	if err != nil {
 		return nil, err
-	} else {
-		serverConfig.httpServer = httpConfig
 	}
+	serverConfig.httpServer = httpConfig
 
-	if databaseConfig, err := getDatabaseConfig(v); err != nil {
+	databaseConfig, err := getDatabaseConfig(v)
+	if err != nil {
 		return nil, err
-	} else {
-		serverConfig.database = databaseConfig
 	}
+	serverConfig.database = databaseConfig
 
-	if loggingConfig, err := getLoggingConfig(v); err != nil {
+	loggingConfig, err := getLoggingConfig(v)
+	if err != nil {
 		return nil, err
-	} else {
-		serverConfig.logging = loggingConfig
 	}
+	serverConfig.logging = loggingConfig
 
 	return serverConfig, nil
 }
@@ -188,6 +224,36 @@ func getDatabaseConfig(v *viper.Viper) (*DatabaseConfig, error) {
 	}
 
 	databaseConfig.userFilePath = v.GetString("database.user_file_path")
+
+	databaseConfig.host = v.GetString("database.host")
+	if len(databaseConfig.host) == 0 {
+		return nil, server_error.New("CONFIG_PARSER", "database host is empty")
+	}
+
+	databaseConfig.port = v.GetInt("database.port")
+	if databaseConfig.port == 0 {
+		databaseConfig.port = 5432
+	}
+
+	databaseConfig.username = v.GetString("database.username")
+	if len(databaseConfig.username) == 0 {
+		return nil, server_error.New("CONFIG_PARSER", "database username is empty")
+	}
+
+	databaseConfig.password = v.GetString("database.password")
+	if len(databaseConfig.password) == 0 {
+		return nil, server_error.New("CONFIG_PARSER", "database password is empty")
+	}
+
+	databaseConfig.dbName = v.GetString("database.db_name")
+	if len(databaseConfig.dbName) == 0 {
+		return nil, server_error.New("CONFIG_PARSER", "database name is empty")
+	}
+
+	databaseConfig.sslMode = v.GetString("database.ssl_mode")
+	if len(databaseConfig.sslMode) == 0 {
+		databaseConfig.sslMode = "disable"
+	}
 
 	return &databaseConfig, nil
 }
