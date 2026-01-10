@@ -47,6 +47,20 @@ func (_c *SessionCreate) SetNillableIsActive(v *bool) *SessionCreate {
 	return _c
 }
 
+// SetRememberMe sets the "remember_me" field.
+func (_c *SessionCreate) SetRememberMe(v bool) *SessionCreate {
+	_c.mutation.SetRememberMe(v)
+	return _c
+}
+
+// SetNillableRememberMe sets the "remember_me" field if the given value is not nil.
+func (_c *SessionCreate) SetNillableRememberMe(v *bool) *SessionCreate {
+	if v != nil {
+		_c.SetRememberMe(*v)
+	}
+	return _c
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_c *SessionCreate) SetExpiresAt(v time.Time) *SessionCreate {
 	_c.mutation.SetExpiresAt(v)
@@ -181,6 +195,10 @@ func (_c *SessionCreate) defaults() {
 		v := session.DefaultIsActive
 		_c.mutation.SetIsActive(v)
 	}
+	if _, ok := _c.mutation.RememberMe(); !ok {
+		v := session.DefaultRememberMe
+		_c.mutation.SetRememberMe(v)
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := session.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
@@ -211,6 +229,9 @@ func (_c *SessionCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsActive(); !ok {
 		return &ValidationError{Name: "is_active", err: errors.New(`client: missing required field "Session.is_active"`)}
+	}
+	if _, ok := _c.mutation.RememberMe(); !ok {
+		return &ValidationError{Name: "remember_me", err: errors.New(`client: missing required field "Session.remember_me"`)}
 	}
 	if _, ok := _c.mutation.ExpiresAt(); !ok {
 		return &ValidationError{Name: "expires_at", err: errors.New(`client: missing required field "Session.expires_at"`)}
@@ -272,6 +293,10 @@ func (_c *SessionCreate) createSpec() (*Session, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IsActive(); ok {
 		_spec.SetField(session.FieldIsActive, field.TypeBool, value)
 		_node.IsActive = value
+	}
+	if value, ok := _c.mutation.RememberMe(); ok {
+		_spec.SetField(session.FieldRememberMe, field.TypeBool, value)
+		_node.RememberMe = value
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(session.FieldExpiresAt, field.TypeTime, value)

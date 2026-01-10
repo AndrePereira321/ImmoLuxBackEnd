@@ -18,6 +18,7 @@ func (Session) Fields() []ent.Field {
 		field.Int("user_id").Positive(),
 		field.String("session_token").Unique().NotEmpty().Sensitive().MaxLen(255),
 		field.Bool("is_active").Default(true),
+		field.Bool("remember_me").Default(false),
 		field.Time("expires_at"),
 		field.Time("invalidated_at").Optional().Nillable(),
 		field.String("invalidated_reason").Optional().Nillable().MaxLen(500),

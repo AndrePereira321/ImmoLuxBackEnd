@@ -13,6 +13,7 @@ var (
 		{Name: "id", Type: field.TypeInt, Increment: true},
 		{Name: "session_token", Type: field.TypeString, Unique: true, Size: 255},
 		{Name: "is_active", Type: field.TypeBool, Default: true},
+		{Name: "remember_me", Type: field.TypeBool, Default: false},
 		{Name: "expires_at", Type: field.TypeTime},
 		{Name: "invalidated_at", Type: field.TypeTime, Nullable: true},
 		{Name: "invalidated_reason", Type: field.TypeString, Nullable: true, Size: 500},
@@ -30,7 +31,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "sessions_users_sessions",
-				Columns:    []*schema.Column{SessionsColumns[10]},
+				Columns:    []*schema.Column{SessionsColumns[11]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -39,7 +40,7 @@ var (
 			{
 				Name:    "session_user_id_is_active",
 				Unique:  false,
-				Columns: []*schema.Column{SessionsColumns[10], SessionsColumns[2]},
+				Columns: []*schema.Column{SessionsColumns[11], SessionsColumns[2]},
 			},
 			{
 				Name:    "session_session_token",

@@ -1,3 +1,5 @@
 package config
 
-const ImmoLuxDbUrl = "DATABASE_URL"
+const (
+	SessionCookieName = "session_token"
+)

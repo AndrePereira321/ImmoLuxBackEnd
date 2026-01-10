@@ -70,23 +70,63 @@ func (s *Server) Listen() error {
 
 func (s *Server) Get(path string, handler RouteHandler) {
 	s.fiber.Get(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler)
+		return s.handleRoute(ctx, handler, false)
 	})
 }
 
 func (s *Server) Post(path string, handler RouteHandler) {
 	s.fiber.Post(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler)
+		return s.handleRoute(ctx, handler, false)
 	})
 }
 
-func (s *Server) handleRoute(ctx fiber.Ctx, handler RouteHandler) error {
-	routeContext, err := routes.GetRouteContext(s.logger, ctx, s.db)
-	if err != nil {
-		return err
+func (s *Server) Put(path string, handler RouteHandler) {
+	s.fiber.Put(ApiPrefix+path, func(ctx fiber.Ctx) error {
+		return s.handleRoute(ctx, handler, false)
+	})
+}
+
+func (s *Server) Delete(path string, handler RouteHandler) {
+	s.fiber.Delete(ApiPrefix+path, func(ctx fiber.Ctx) error {
+		return s.handleRoute(ctx, handler, false)
+	})
+}
+
+func (s *Server) SecuredGet(path string, handler RouteHandler) {
+	s.fiber.Get(ApiPrefix+path, func(ctx fiber.Ctx) error {
+		return s.handleRoute(ctx, handler, true)
+	})
+}
+
+func (s *Server) SecuredPost(path string, handler RouteHandler) {
+	s.fiber.Post(ApiPrefix+path, func(ctx fiber.Ctx) error {
+		return s.handleRoute(ctx, handler, true)
+	})
+}
+
+func (s *Server) SecuredPut(path string, handler RouteHandler) {
+	s.fiber.Put(ApiPrefix+path, func(ctx fiber.Ctx) error {
+		return s.handleRoute(ctx, handler, true)
+	})
+}
+
+func (s *Server) SecuredDelete(path string, handler RouteHandler) {
+	s.fiber.Delete(ApiPrefix+path, func(ctx fiber.Ctx) error {
+		return s.handleRoute(ctx, handler, true)
+	})
+}
+
+func (s *Server) handleRoute(ctx fiber.Ctx, handler RouteHandler, requireAuth bool) error {
+	routeContext := routes.GetRouteContext(s.logger, ctx, s.db, s.config)
+	if requireAuth && !routeContext.IsAuthenticated() {
+		authError := routeContext.GetAuthError()
+		if authError != nil {
+			return routeContext.RespondError(fiber.StatusUnauthorized, authError.Code, authError.Message)
+		}
+		return routeContext.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
 	}
 
-	err = handler(routeContext)
+	err := handler(routeContext)
 	if err != nil {
 		return handleServerError(routeContext, err)
 	}

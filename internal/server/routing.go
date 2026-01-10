@@ -13,6 +13,9 @@ type RouteHandler func(ctx *routes.RouteContext) error
 func (s *Server) RegisterRoutes() {
 	s.Get("/ping", routes.Ping)
 	s.Post("/login", routes.Login)
+	s.Get("/isconnected", routes.IsConnected)
+
+	s.SecuredPost("/logout", routes.Logout)
 
 	s.serveSPA()
 }

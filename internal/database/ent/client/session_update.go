@@ -71,6 +71,20 @@ func (_u *SessionUpdate) SetNillableIsActive(v *bool) *SessionUpdate {
 	return _u
 }
 
+// SetRememberMe sets the "remember_me" field.
+func (_u *SessionUpdate) SetRememberMe(v bool) *SessionUpdate {
+	_u.mutation.SetRememberMe(v)
+	return _u
+}
+
+// SetNillableRememberMe sets the "remember_me" field if the given value is not nil.
+func (_u *SessionUpdate) SetNillableRememberMe(v *bool) *SessionUpdate {
+	if v != nil {
+		_u.SetRememberMe(*v)
+	}
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *SessionUpdate) SetExpiresAt(v time.Time) *SessionUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -274,6 +288,9 @@ func (_u *SessionUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.IsActive(); ok {
 		_spec.SetField(session.FieldIsActive, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.RememberMe(); ok {
+		_spec.SetField(session.FieldRememberMe, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(session.FieldExpiresAt, field.TypeTime, value)
 	}
@@ -391,6 +408,20 @@ func (_u *SessionUpdateOne) SetIsActive(v bool) *SessionUpdateOne {
 func (_u *SessionUpdateOne) SetNillableIsActive(v *bool) *SessionUpdateOne {
 	if v != nil {
 		_u.SetIsActive(*v)
+	}
+	return _u
+}
+
+// SetRememberMe sets the "remember_me" field.
+func (_u *SessionUpdateOne) SetRememberMe(v bool) *SessionUpdateOne {
+	_u.mutation.SetRememberMe(v)
+	return _u
+}
+
+// SetNillableRememberMe sets the "remember_me" field if the given value is not nil.
+func (_u *SessionUpdateOne) SetNillableRememberMe(v *bool) *SessionUpdateOne {
+	if v != nil {
+		_u.SetRememberMe(*v)
 	}
 	return _u
 }
@@ -627,6 +658,9 @@ func (_u *SessionUpdateOne) sqlSave(ctx context.Context) (_node *Session, err er
 	}
 	if value, ok := _u.mutation.IsActive(); ok {
 		_spec.SetField(session.FieldIsActive, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.RememberMe(); ok {
+		_spec.SetField(session.FieldRememberMe, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(session.FieldExpiresAt, field.TypeTime, value)

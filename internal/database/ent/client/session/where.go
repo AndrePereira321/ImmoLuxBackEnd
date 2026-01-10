@@ -70,6 +70,11 @@ func IsActive(v bool) predicate.Session {
 	return predicate.Session(sql.FieldEQ(FieldIsActive, v))
 }
 
+// RememberMe applies equality check predicate on the "remember_me" field. It's identical to RememberMeEQ.
+func RememberMe(v bool) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldRememberMe, v))
+}
+
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.Session {
 	return predicate.Session(sql.FieldEQ(FieldExpiresAt, v))
@@ -198,6 +203,16 @@ func IsActiveEQ(v bool) predicate.Session {
 // IsActiveNEQ applies the NEQ predicate on the "is_active" field.
 func IsActiveNEQ(v bool) predicate.Session {
 	return predicate.Session(sql.FieldNEQ(FieldIsActive, v))
+}
+
+// RememberMeEQ applies the EQ predicate on the "remember_me" field.
+func RememberMeEQ(v bool) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldRememberMe, v))
+}
+
+// RememberMeNEQ applies the NEQ predicate on the "remember_me" field.
+func RememberMeNEQ(v bool) predicate.Session {
+	return predicate.Session(sql.FieldNEQ(FieldRememberMe, v))
 }
 
 // ExpiresAtEQ applies the EQ predicate on the "expires_at" field.

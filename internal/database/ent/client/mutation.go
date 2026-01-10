@@ -39,6 +39,7 @@ type SessionMutation struct {
 	id                 *int
 	session_token      *string
 	is_active          *bool
+	remember_me        *bool
 	expires_at         *time.Time
 	invalidated_at     *time.Time
 	invalidated_reason *string
@@ -258,6 +259,42 @@ func (m *SessionMutation) OldIsActive(ctx context.Context) (v bool, err error) {
 // ResetIsActive resets all changes to the "is_active" field.
 func (m *SessionMutation) ResetIsActive() {
 	m.is_active = nil
+}
+
+// SetRememberMe sets the "remember_me" field.
+func (m *SessionMutation) SetRememberMe(b bool) {
+	m.remember_me = &b
+}
+
+// RememberMe returns the value of the "remember_me" field in the mutation.
+func (m *SessionMutation) RememberMe() (r bool, exists bool) {
+	v := m.remember_me
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRememberMe returns the old "remember_me" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldRememberMe(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRememberMe is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRememberMe requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRememberMe: %w", err)
+	}
+	return oldValue.RememberMe, nil
+}
+
+// ResetRememberMe resets all changes to the "remember_me" field.
+func (m *SessionMutation) ResetRememberMe() {
+	m.remember_me = nil
 }
 
 // SetExpiresAt sets the "expires_at" field.
@@ -625,7 +662,7 @@ func (m *SessionMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *SessionMutation) Fields() []string {
-	fields := make([]string, 0, 10)
+	fields := make([]string, 0, 11)
 	if m.user != nil {
 		fields = append(fields, session.FieldUserID)
 	}
@@ -634,6 +671,9 @@ func (m *SessionMutation) Fields() []string {
 	}
 	if m.is_active != nil {
 		fields = append(fields, session.FieldIsActive)
+	}
+	if m.remember_me != nil {
+		fields = append(fields, session.FieldRememberMe)
 	}
 	if m.expires_at != nil {
 		fields = append(fields, session.FieldExpiresAt)
@@ -670,6 +710,8 @@ func (m *SessionMutation) Field(name string) (ent.Value, bool) {
 		return m.SessionToken()
 	case session.FieldIsActive:
 		return m.IsActive()
+	case session.FieldRememberMe:
+		return m.RememberMe()
 	case session.FieldExpiresAt:
 		return m.ExpiresAt()
 	case session.FieldInvalidatedAt:
@@ -699,6 +741,8 @@ func (m *SessionMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldSessionToken(ctx)
 	case session.FieldIsActive:
 		return m.OldIsActive(ctx)
+	case session.FieldRememberMe:
+		return m.OldRememberMe(ctx)
 	case session.FieldExpiresAt:
 		return m.OldExpiresAt(ctx)
 	case session.FieldInvalidatedAt:
@@ -742,6 +786,13 @@ func (m *SessionMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetIsActive(v)
+		return nil
+	case session.FieldRememberMe:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRememberMe(v)
 		return nil
 	case session.FieldExpiresAt:
 		v, ok := value.(time.Time)
@@ -879,6 +930,9 @@ func (m *SessionMutation) ResetField(name string) error {
 		return nil
 	case session.FieldIsActive:
 		m.ResetIsActive()
+		return nil
+	case session.FieldRememberMe:
+		m.ResetRememberMe()
 		return nil
 	case session.FieldExpiresAt:
 		m.ResetExpiresAt()

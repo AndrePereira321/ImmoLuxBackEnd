@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"immo-lux/internal/database/ent/client"
 	"immo-lux/internal/database/ent/client/user"
+	"immo-lux/internal/database/ent/client/userauth"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
 	"immo-lux/internal/utils"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -85,6 +87,18 @@ func (rep *UserRepository) GetUserID(email string) (models.RecordId, error) {
 		return models.InvalidRecordId, server_error.Wrap("USER_REPOSITORY", "failed querying user", err)
 	}
 	return models.RecordId(u.ID), nil
+}
+
+func (rep *UserRepository) GetUserById(ctx context.Context, userId models.RecordId) (*models.UserDTO, error) {
+	u, err := rep.db.client.User.Get(ctx, int(userId))
+	if err != nil {
+		if client.IsNotFound(err) {
+			return nil, server_error.New("USER_NOT_FOUND", fmt.Sprintf("user not found: %d", userId))
+		}
+		return nil, server_error.Wrap("USER_REPOSITORY", "failed querying user by ID", err)
+	}
+
+	return rep.userToDTO(u), nil
 }
 
 func (rep *UserRepository) UserExists(email string) (bool, error) {
@@ -176,4 +190,57 @@ func (rep *UserRepository) hashPassword(password string) (string, error) {
 		return "", server_error.Wrap("USER_REPOSITORY", "error hashing password", err)
 	}
 	return string(hashedPassword), nil
+}
+
+func (rep *UserRepository) IncrementFailedAttempts(ctx context.Context, tx *client.Tx, userId models.RecordId) error {
+	authRecord, err := tx.UserAuth.Query().
+		Where(userauth.UserIDEQ(int(userId))).
+		Only(ctx)
+	if err != nil {
+		return server_error.Wrap("USER_REPOSITORY", "failed to query user auth", err)
+	}
+
+	newAttempts := authRecord.FailedLoginAttempts + 1
+	updateBuilder := tx.UserAuth.UpdateOneID(authRecord.ID).
+		SetFailedLoginAttempts(newAttempts).
+		SetLastFailedAttempt(time.Now())
+
+	if newAttempts >= 5 {
+		rep.db.Logger().Warn(fmt.Sprintf("User %d locked due to 5 failed login attempts", userId))
+		updateBuilder.SetIsLocked(true).SetLockedReason("Account locked due to multiple failed login attempts")
+	}
+
+	_, err = updateBuilder.Save(ctx)
+	if err != nil {
+		return server_error.Wrap("USER_REPOSITORY", "failed to increment failed attempts", err)
+	}
+
+	return nil
+}
+
+func (rep *UserRepository) ResetFailedAttempts(ctx context.Context, tx *client.Tx, userId models.RecordId) error {
+	_, err := tx.UserAuth.Update().
+		Where(userauth.UserIDEQ(int(userId))).
+		SetFailedLoginAttempts(0).
+		ClearLastFailedAttempt().
+		Save(ctx)
+
+	if err != nil {
+		return server_error.Wrap("USER_REPOSITORY", "failed to reset failed attempts", err)
+	}
+
+	return nil
+}
+
+func (rep *UserRepository) userToDTO(u *client.User) *models.UserDTO {
+	userId := models.RecordId(u.ID)
+	return &models.UserDTO{
+		ID:        &userId,
+		FirstName: &u.FirstName,
+		LastName:  &u.LastName,
+		Email:     &u.Email,
+		IsActive:  &u.IsActive,
+		CreatedAt: &u.CreatedAt,
+		UpdatedAt: &u.UpdatedAt,
+	}
 }

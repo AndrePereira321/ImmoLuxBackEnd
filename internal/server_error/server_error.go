@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"immo-lux/internal/models"
+	"strings"
 )
 
 type ServerError struct {
@@ -48,6 +49,11 @@ func (e *ServerError) ToServerAPIError() *models.ServerAPIError {
 
 func (e *ServerError) String() string {
 	return e.Error()
+}
+
+func (e *ServerError) Contains(substring string) bool {
+	return strings.Contains(e.Message, substring) ||
+		(e.Cause != nil && strings.Contains(e.Cause.Error(), substring))
 }
 
 func IsServerError(err error, code string) bool {

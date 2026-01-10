@@ -24,6 +24,8 @@ type Session struct {
 	SessionToken string `json:"-"`
 	// IsActive holds the value of the "is_active" field.
 	IsActive bool `json:"is_active,omitempty"`
+	// RememberMe holds the value of the "remember_me" field.
+	RememberMe bool `json:"remember_me,omitempty"`
 	// ExpiresAt holds the value of the "expires_at" field.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 	// InvalidatedAt holds the value of the "invalidated_at" field.
@@ -69,7 +71,7 @@ func (*Session) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case session.FieldIsActive:
+		case session.FieldIsActive, session.FieldRememberMe:
 			values[i] = new(sql.NullBool)
 		case session.FieldID, session.FieldUserID:
 			values[i] = new(sql.NullInt64)
@@ -115,6 +117,12 @@ func (_m *Session) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field is_active", values[i])
 			} else if value.Valid {
 				_m.IsActive = value.Bool
+			}
+		case session.FieldRememberMe:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field remember_me", values[i])
+			} else if value.Valid {
+				_m.RememberMe = value.Bool
 			}
 		case session.FieldExpiresAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -210,6 +218,9 @@ func (_m *Session) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("is_active=")
 	builder.WriteString(fmt.Sprintf("%v", _m.IsActive))
+	builder.WriteString(", ")
+	builder.WriteString("remember_me=")
+	builder.WriteString(fmt.Sprintf("%v", _m.RememberMe))
 	builder.WriteString(", ")
 	builder.WriteString("expires_at=")
 	builder.WriteString(_m.ExpiresAt.Format(time.ANSIC))

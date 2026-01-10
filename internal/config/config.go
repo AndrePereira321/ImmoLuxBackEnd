@@ -14,6 +14,7 @@ type ServerConfig struct {
 	httpServer *HttpConfig
 	database   *DatabaseConfig
 	logging    *LoggingConfig
+	security   *SecurityConfig
 }
 
 func (c *ServerConfig) AppConfig() *AppConfig {
@@ -30,6 +31,10 @@ func (c *ServerConfig) Logging() *LoggingConfig {
 
 func (c *ServerConfig) Database() *DatabaseConfig {
 	return c.database
+}
+
+func (c *ServerConfig) Security() *SecurityConfig {
+	return c.security
 }
 
 type AppConfig struct {
@@ -144,6 +149,24 @@ func (l *LoggingConfig) DatabaseLogLevel() string {
 	return l.databaseLogLevel
 }
 
+type SecurityConfig struct {
+	jwtSecret    string
+	jwtIssuer    string
+	cookieSecure bool
+}
+
+func (s *SecurityConfig) JwtSecret() string {
+	return s.jwtSecret
+}
+
+func (s *SecurityConfig) JwtIssuer() string {
+	return s.jwtIssuer
+}
+
+func (s *SecurityConfig) CookieSecure() bool {
+	return s.cookieSecure
+}
+
 func GetServerConfig(data []byte) (*ServerConfig, error) {
 	serverConfig := &ServerConfig{}
 	v := getViper()
@@ -175,6 +198,12 @@ func GetServerConfig(data []byte) (*ServerConfig, error) {
 		return nil, err
 	}
 	serverConfig.logging = loggingConfig
+
+	securityConfig, err := getSecurityConfig(v)
+	if err != nil {
+		return nil, err
+	}
+	serverConfig.security = securityConfig
 
 	return serverConfig, nil
 }
@@ -290,6 +319,27 @@ func getAppConfig(v *viper.Viper) (*AppConfig, error) {
 	appConfig.version = version
 
 	return &appConfig, nil
+}
+
+func getSecurityConfig(v *viper.Viper) (*SecurityConfig, error) {
+	securityConfig := SecurityConfig{}
+
+	securityConfig.jwtSecret = v.GetString("security.jwt_secret")
+	if len(securityConfig.jwtSecret) == 0 {
+		return nil, server_error.New("CONFIG_PARSER", "JWT secret is empty")
+	}
+	if len(securityConfig.jwtSecret) < 32 {
+		return nil, server_error.New("CONFIG_PARSER", "JWT secret must be at least 32 characters")
+	}
+
+	securityConfig.jwtIssuer = v.GetString("security.jwt_issuer")
+	if len(securityConfig.jwtIssuer) == 0 {
+		securityConfig.jwtIssuer = "immolux"
+	}
+
+	securityConfig.cookieSecure = v.GetBool("security.cookie_secure")
+
+	return &securityConfig, nil
 }
 
 func getViper() *viper.Viper {

@@ -42,24 +42,28 @@ func init() {
 	sessionDescIsActive := sessionFields[2].Descriptor()
 	// session.DefaultIsActive holds the default value on creation for the is_active field.
 	session.DefaultIsActive = sessionDescIsActive.Default.(bool)
+	// sessionDescRememberMe is the schema descriptor for remember_me field.
+	sessionDescRememberMe := sessionFields[3].Descriptor()
+	// session.DefaultRememberMe holds the default value on creation for the remember_me field.
+	session.DefaultRememberMe = sessionDescRememberMe.Default.(bool)
 	// sessionDescInvalidatedReason is the schema descriptor for invalidated_reason field.
-	sessionDescInvalidatedReason := sessionFields[5].Descriptor()
+	sessionDescInvalidatedReason := sessionFields[6].Descriptor()
 	// session.InvalidatedReasonValidator is a validator for the "invalidated_reason" field. It is called by the builders before save.
 	session.InvalidatedReasonValidator = sessionDescInvalidatedReason.Validators[0].(func(string) error)
 	// sessionDescIPAddress is the schema descriptor for ip_address field.
-	sessionDescIPAddress := sessionFields[6].Descriptor()
+	sessionDescIPAddress := sessionFields[7].Descriptor()
 	// session.IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
 	session.IPAddressValidator = sessionDescIPAddress.Validators[0].(func(string) error)
 	// sessionDescUserAgent is the schema descriptor for user_agent field.
-	sessionDescUserAgent := sessionFields[7].Descriptor()
+	sessionDescUserAgent := sessionFields[8].Descriptor()
 	// session.UserAgentValidator is a validator for the "user_agent" field. It is called by the builders before save.
 	session.UserAgentValidator = sessionDescUserAgent.Validators[0].(func(string) error)
 	// sessionDescCreatedAt is the schema descriptor for created_at field.
-	sessionDescCreatedAt := sessionFields[8].Descriptor()
+	sessionDescCreatedAt := sessionFields[9].Descriptor()
 	// session.DefaultCreatedAt holds the default value on creation for the created_at field.
 	session.DefaultCreatedAt = sessionDescCreatedAt.Default.(func() time.Time)
 	// sessionDescUpdatedAt is the schema descriptor for updated_at field.
-	sessionDescUpdatedAt := sessionFields[9].Descriptor()
+	sessionDescUpdatedAt := sessionFields[10].Descriptor()
 	// session.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	session.DefaultUpdatedAt = sessionDescUpdatedAt.Default.(func() time.Time)
 	// session.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.

@@ -20,6 +20,8 @@ const (
 	FieldSessionToken = "session_token"
 	// FieldIsActive holds the string denoting the is_active field in the database.
 	FieldIsActive = "is_active"
+	// FieldRememberMe holds the string denoting the remember_me field in the database.
+	FieldRememberMe = "remember_me"
 	// FieldExpiresAt holds the string denoting the expires_at field in the database.
 	FieldExpiresAt = "expires_at"
 	// FieldInvalidatedAt holds the string denoting the invalidated_at field in the database.
@@ -53,6 +55,7 @@ var Columns = []string{
 	FieldUserID,
 	FieldSessionToken,
 	FieldIsActive,
+	FieldRememberMe,
 	FieldExpiresAt,
 	FieldInvalidatedAt,
 	FieldInvalidatedReason,
@@ -79,6 +82,8 @@ var (
 	SessionTokenValidator func(string) error
 	// DefaultIsActive holds the default value on creation for the "is_active" field.
 	DefaultIsActive bool
+	// DefaultRememberMe holds the default value on creation for the "remember_me" field.
+	DefaultRememberMe bool
 	// InvalidatedReasonValidator is a validator for the "invalidated_reason" field. It is called by the builders before save.
 	InvalidatedReasonValidator func(string) error
 	// IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
@@ -114,6 +119,11 @@ func BySessionToken(opts ...sql.OrderTermOption) OrderOption {
 // ByIsActive orders the results by the is_active field.
 func ByIsActive(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsActive, opts...).ToFunc()
+}
+
+// ByRememberMe orders the results by the remember_me field.
+func ByRememberMe(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRememberMe, opts...).ToFunc()
 }
 
 // ByExpiresAt orders the results by the expires_at field.

@@ -90,6 +90,10 @@ func (db *Database) NewUserRepository() *UserRepository {
 	return NewUserRepository(db)
 }
 
+func (db *Database) NewSessionRepository() *SessionRepository {
+	return NewSessionRepository(db)
+}
+
 func (db *Database) WithTransaction(fn func(ctx context.Context, tx *client.Tx) error) error {
 	ctx := context.Background()
 	tx, err := db.client.Tx(ctx)
