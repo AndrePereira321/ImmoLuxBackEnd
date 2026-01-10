@@ -42,10 +42,10 @@ func New(serverConfig *config.ServerConfig) (*Server, error) {
 
 	fiberApp := getFiberApp(serverConfig)
 
-	if serverConfig.HttpServer().Origin() != "" {
+	if len(serverConfig.HttpServer().Origins()) > 0 {
 		fiberApp.Use(cors.New(cors.Config{
 			AllowCredentials: true,
-			AllowOrigins:     []string{serverConfig.HttpServer().Origin()},
+			AllowOrigins:     serverConfig.HttpServer().Origins(),
 			AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
 			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		}))

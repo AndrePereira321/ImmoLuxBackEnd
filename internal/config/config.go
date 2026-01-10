@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"immo-lux/internal/server_error"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -48,7 +49,7 @@ type HttpConfig struct {
 	host          string
 	port          uint
 	enablePreFork bool
-	origin        string
+	origins       []string
 	spaFolder     string
 }
 
@@ -64,8 +65,8 @@ func (s *HttpConfig) EnablePreFork() bool {
 	return s.enablePreFork
 }
 
-func (s *HttpConfig) Origin() string {
-	return s.origin
+func (s *HttpConfig) Origins() []string {
+	return s.origins
 }
 
 func (s *HttpConfig) SpaFolder() string {
@@ -192,7 +193,17 @@ func getHttpConfig(v *viper.Viper) (*HttpConfig, error) {
 	}
 
 	httpConfig.enablePreFork = v.GetBool("server.enable_pre_fork")
-	httpConfig.origin = v.GetString("server.origin")
+
+	originStr := v.GetString("server.origin")
+	if len(originStr) > 0 {
+		parts := strings.Split(originStr, ",")
+		origins := make([]string, 0, len(parts))
+		for _, part := range parts {
+			origins = append(origins, strings.TrimSpace(part))
+		}
+		httpConfig.origins = origins
+	}
+
 	httpConfig.spaFolder = v.GetString("server.spaFolder")
 
 	return &httpConfig, nil
