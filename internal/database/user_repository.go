@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"immo-lux/internal/database/ent/client"
 	"immo-lux/internal/database/ent/client/user"
-	"immo-lux/internal/database/ent/client/userauth"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
 	"immo-lux/internal/utils"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -56,8 +54,6 @@ func (rep *UserRepository) CreateUser(ctx context.Context, tx *client.Tx, user *
 	_, err = tx.UserAuth.Create().
 		SetUserID(createdUser.ID).
 		SetHash(hashedPassword).
-		SetIsLocked(false).
-		SetFailedLoginAttempts(0).
 		Save(ctx)
 	if err != nil {
 		rep.db.Logger().Error(fmt.Sprintf("Failed to create auth for user [%s]: %s", *user.Email, err.Error()))
@@ -149,16 +145,12 @@ func (rep *UserRepository) GetUserAuth(email string) (*models.UserDTO, *models.U
 	}
 
 	userAuthDTO := &models.UserAuthDTO{
-		ID:                  &userAuthId,
-		UserID:              &userAuthUserId,
-		Hash:                &auth.Hash,
-		IsLocked:            &auth.IsLocked,
-		LockedReason:        auth.LockedReason,
-		FailedLoginAttempts: &auth.FailedLoginAttempts,
-		LastFailedLogin:     auth.LastFailedAttempt,
-		PasswordChangedAt:   auth.PasswordChangedAt,
-		CreatedAt:           &auth.CreatedAt,
-		UpdatedAt:           &auth.UpdatedAt,
+		ID:                &userAuthId,
+		UserID:            &userAuthUserId,
+		Hash:              &auth.Hash,
+		PasswordChangedAt: auth.PasswordChangedAt,
+		CreatedAt:         &auth.CreatedAt,
+		UpdatedAt:         &auth.UpdatedAt,
 	}
 
 	return userDTO, userAuthDTO, nil
@@ -190,46 +182,6 @@ func (rep *UserRepository) hashPassword(password string) (string, error) {
 		return "", server_error.Wrap("USER_REPOSITORY", "error hashing password", err)
 	}
 	return string(hashedPassword), nil
-}
-
-func (rep *UserRepository) IncrementFailedAttempts(ctx context.Context, tx *client.Tx, userId models.RecordId) error {
-	authRecord, err := tx.UserAuth.Query().
-		Where(userauth.UserIDEQ(int(userId))).
-		Only(ctx)
-	if err != nil {
-		return server_error.Wrap("USER_REPOSITORY", "failed to query user auth", err)
-	}
-
-	newAttempts := authRecord.FailedLoginAttempts + 1
-	updateBuilder := tx.UserAuth.UpdateOneID(authRecord.ID).
-		SetFailedLoginAttempts(newAttempts).
-		SetLastFailedAttempt(time.Now())
-
-	if newAttempts >= 5 {
-		rep.db.Logger().Warn(fmt.Sprintf("User %d locked due to 5 failed login attempts", userId))
-		updateBuilder.SetIsLocked(true).SetLockedReason("Account locked due to multiple failed login attempts")
-	}
-
-	_, err = updateBuilder.Save(ctx)
-	if err != nil {
-		return server_error.Wrap("USER_REPOSITORY", "failed to increment failed attempts", err)
-	}
-
-	return nil
-}
-
-func (rep *UserRepository) ResetFailedAttempts(ctx context.Context, tx *client.Tx, userId models.RecordId) error {
-	_, err := tx.UserAuth.Update().
-		Where(userauth.UserIDEQ(int(userId))).
-		SetFailedLoginAttempts(0).
-		ClearLastFailedAttempt().
-		Save(ctx)
-
-	if err != nil {
-		return server_error.Wrap("USER_REPOSITORY", "failed to reset failed attempts", err)
-	}
-
-	return nil
 }
 
 func (rep *UserRepository) userToDTO(u *client.User) *models.UserDTO {

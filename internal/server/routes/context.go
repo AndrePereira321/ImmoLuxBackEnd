@@ -14,8 +14,8 @@ import (
 )
 
 type UserContext struct {
-	userId    models.RecordId
-	sessionId models.RecordId
+	UserID    models.RecordId
+	SessionID models.RecordId
 }
 
 type AuthError struct {
@@ -69,18 +69,26 @@ func (route *RouteContext) GetAuthError() *AuthError {
 	return route.authError
 }
 
+func (route *RouteContext) UserContext() *UserContext {
+	return route.userContext
+}
+
 func (route *RouteContext) GetUserId() models.RecordId {
 	if route.userContext == nil {
 		return models.InvalidRecordId
 	}
-	return route.userContext.userId
+	return route.userContext.UserID
 }
 
 func (route *RouteContext) GetSessionId() models.RecordId {
 	if route.userContext == nil {
 		return models.InvalidRecordId
 	}
-	return route.userContext.sessionId
+	return route.userContext.SessionID
+}
+
+func (route *RouteContext) InternalError(msg string) error {
+	return route.RespondError(fiber.StatusInternalServerError, "INTERNAL_ERROR", msg)
 }
 
 func (route *RouteContext) BadRequest(msg string) error {
@@ -125,6 +133,10 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 	claims, err := utils.ValidateJWT(jwtToken, jwtSecret)
 	if err != nil {
 		logger.Debug(fmt.Sprintf("Invalid JWT token: %s", err.Error()))
+
+		// Clear invalid cookie
+		clearSessionCookie(ctx, serverConfig)
+
 		if server_error.IsServerError(err, "JWT_VALIDATION") {
 			serverErr := err.(*server_error.ServerError)
 			if serverErr.Contains("expired") {
@@ -150,12 +162,16 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 	isValid, err := sessionRepo.ValidateSession(context.Background(), sessionId)
 	if err != nil {
 		logger.Warn(fmt.Sprintf("Error validating session: %s", err.Error()))
+
+		// Clear cookie if session not found in database
 		if server_error.IsServerError(err, "SESSION_NOT_FOUND") {
+			clearSessionCookie(ctx, serverConfig)
 			return nil, &AuthError{
 				Code:    "SESSION_NOT_FOUND",
 				Message: "Session not found",
 			}
 		}
+
 		return nil, &AuthError{
 			Code:    "SESSION_VALIDATION_ERROR",
 			Message: "Failed to validate session",
@@ -164,6 +180,10 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 
 	if !isValid {
 		logger.Debug(fmt.Sprintf("Session %d is not valid or expired", sessionId))
+
+		// Clear cookie if session is invalid/expired
+		clearSessionCookie(ctx, serverConfig)
+
 		return nil, &AuthError{
 			Code:    "SESSION_INVALID",
 			Message: "Session is expired or has been invalidated",
@@ -173,7 +193,7 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 	userId := models.RecordId(claims.UserId)
 
 	return &UserContext{
-		userId:    userId,
-		sessionId: sessionId,
+		UserID:    userId,
+		SessionID: sessionId,
 	}, nil
 }

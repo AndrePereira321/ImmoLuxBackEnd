@@ -22,14 +22,6 @@ type UserAuth struct {
 	UserID int `json:"user_id,omitempty"`
 	// Hash holds the value of the "hash" field.
 	Hash string `json:"-"`
-	// IsLocked holds the value of the "is_locked" field.
-	IsLocked bool `json:"is_locked,omitempty"`
-	// LockedReason holds the value of the "locked_reason" field.
-	LockedReason *string `json:"locked_reason,omitempty"`
-	// FailedLoginAttempts holds the value of the "failed_login_attempts" field.
-	FailedLoginAttempts int `json:"failed_login_attempts,omitempty"`
-	// LastFailedAttempt holds the value of the "last_failed_attempt" field.
-	LastFailedAttempt *time.Time `json:"last_failed_attempt,omitempty"`
 	// PasswordChangedAt holds the value of the "password_changed_at" field.
 	PasswordChangedAt *time.Time `json:"password_changed_at,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
@@ -67,13 +59,11 @@ func (*UserAuth) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case userauth.FieldIsLocked:
-			values[i] = new(sql.NullBool)
-		case userauth.FieldID, userauth.FieldUserID, userauth.FieldFailedLoginAttempts:
+		case userauth.FieldID, userauth.FieldUserID:
 			values[i] = new(sql.NullInt64)
-		case userauth.FieldHash, userauth.FieldLockedReason:
+		case userauth.FieldHash:
 			values[i] = new(sql.NullString)
-		case userauth.FieldLastFailedAttempt, userauth.FieldPasswordChangedAt, userauth.FieldCreatedAt, userauth.FieldUpdatedAt:
+		case userauth.FieldPasswordChangedAt, userauth.FieldCreatedAt, userauth.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -107,32 +97,6 @@ func (_m *UserAuth) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field hash", values[i])
 			} else if value.Valid {
 				_m.Hash = value.String
-			}
-		case userauth.FieldIsLocked:
-			if value, ok := values[i].(*sql.NullBool); !ok {
-				return fmt.Errorf("unexpected type %T for field is_locked", values[i])
-			} else if value.Valid {
-				_m.IsLocked = value.Bool
-			}
-		case userauth.FieldLockedReason:
-			if value, ok := values[i].(*sql.NullString); !ok {
-				return fmt.Errorf("unexpected type %T for field locked_reason", values[i])
-			} else if value.Valid {
-				_m.LockedReason = new(string)
-				*_m.LockedReason = value.String
-			}
-		case userauth.FieldFailedLoginAttempts:
-			if value, ok := values[i].(*sql.NullInt64); !ok {
-				return fmt.Errorf("unexpected type %T for field failed_login_attempts", values[i])
-			} else if value.Valid {
-				_m.FailedLoginAttempts = int(value.Int64)
-			}
-		case userauth.FieldLastFailedAttempt:
-			if value, ok := values[i].(*sql.NullTime); !ok {
-				return fmt.Errorf("unexpected type %T for field last_failed_attempt", values[i])
-			} else if value.Valid {
-				_m.LastFailedAttempt = new(time.Time)
-				*_m.LastFailedAttempt = value.Time
 			}
 		case userauth.FieldPasswordChangedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -198,22 +162,6 @@ func (_m *UserAuth) String() string {
 	builder.WriteString(fmt.Sprintf("%v", _m.UserID))
 	builder.WriteString(", ")
 	builder.WriteString("hash=<sensitive>")
-	builder.WriteString(", ")
-	builder.WriteString("is_locked=")
-	builder.WriteString(fmt.Sprintf("%v", _m.IsLocked))
-	builder.WriteString(", ")
-	if v := _m.LockedReason; v != nil {
-		builder.WriteString("locked_reason=")
-		builder.WriteString(*v)
-	}
-	builder.WriteString(", ")
-	builder.WriteString("failed_login_attempts=")
-	builder.WriteString(fmt.Sprintf("%v", _m.FailedLoginAttempts))
-	builder.WriteString(", ")
-	if v := _m.LastFailedAttempt; v != nil {
-		builder.WriteString("last_failed_attempt=")
-		builder.WriteString(v.Format(time.ANSIC))
-	}
 	builder.WriteString(", ")
 	if v := _m.PasswordChangedAt; v != nil {
 		builder.WriteString("password_changed_at=")

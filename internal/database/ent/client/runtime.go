@@ -3,6 +3,11 @@
 package client
 
 import (
+	"immo-lux/internal/database/ent/client/authlog"
+	"immo-lux/internal/database/ent/client/contact"
+	"immo-lux/internal/database/ent/client/property"
+	"immo-lux/internal/database/ent/client/propertyimage"
+	"immo-lux/internal/database/ent/client/ratelimit"
 	"immo-lux/internal/database/ent/client/session"
 	"immo-lux/internal/database/ent/client/user"
 	"immo-lux/internal/database/ent/client/userauth"
@@ -14,6 +19,348 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	authlogFields := schema.AuthLog{}.Fields()
+	_ = authlogFields
+	// authlogDescEmail is the schema descriptor for email field.
+	authlogDescEmail := authlogFields[1].Descriptor()
+	// authlog.EmailValidator is a validator for the "email" field. It is called by the builders before save.
+	authlog.EmailValidator = authlogDescEmail.Validators[0].(func(string) error)
+	// authlogDescEventType is the schema descriptor for event_type field.
+	authlogDescEventType := authlogFields[2].Descriptor()
+	// authlog.EventTypeValidator is a validator for the "event_type" field. It is called by the builders before save.
+	authlog.EventTypeValidator = authlogDescEventType.Validators[0].(func(string) error)
+	// authlogDescIPAddress is the schema descriptor for ip_address field.
+	authlogDescIPAddress := authlogFields[3].Descriptor()
+	// authlog.IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
+	authlog.IPAddressValidator = authlogDescIPAddress.Validators[0].(func(string) error)
+	// authlogDescUserAgent is the schema descriptor for user_agent field.
+	authlogDescUserAgent := authlogFields[4].Descriptor()
+	// authlog.UserAgentValidator is a validator for the "user_agent" field. It is called by the builders before save.
+	authlog.UserAgentValidator = authlogDescUserAgent.Validators[0].(func(string) error)
+	// authlogDescFailureReason is the schema descriptor for failure_reason field.
+	authlogDescFailureReason := authlogFields[5].Descriptor()
+	// authlog.FailureReasonValidator is a validator for the "failure_reason" field. It is called by the builders before save.
+	authlog.FailureReasonValidator = authlogDescFailureReason.Validators[0].(func(string) error)
+	// authlogDescCreatedAt is the schema descriptor for created_at field.
+	authlogDescCreatedAt := authlogFields[6].Descriptor()
+	// authlog.DefaultCreatedAt holds the default value on creation for the created_at field.
+	authlog.DefaultCreatedAt = authlogDescCreatedAt.Default.(func() time.Time)
+	contactFields := schema.Contact{}.Fields()
+	_ = contactFields
+	// contactDescUserID is the schema descriptor for user_id field.
+	contactDescUserID := contactFields[0].Descriptor()
+	// contact.UserIDValidator is a validator for the "user_id" field. It is called by the builders before save.
+	contact.UserIDValidator = contactDescUserID.Validators[0].(func(int) error)
+	// contactDescName is the schema descriptor for name field.
+	contactDescName := contactFields[1].Descriptor()
+	// contact.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	contact.NameValidator = func() func(string) error {
+		validators := contactDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// contactDescEmail is the schema descriptor for email field.
+	contactDescEmail := contactFields[2].Descriptor()
+	// contact.EmailValidator is a validator for the "email" field. It is called by the builders before save.
+	contact.EmailValidator = func() func(string) error {
+		validators := contactDescEmail.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(email string) error {
+			for _, fn := range fns {
+				if err := fn(email); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// contactDescPhone is the schema descriptor for phone field.
+	contactDescPhone := contactFields[3].Descriptor()
+	// contact.PhoneValidator is a validator for the "phone" field. It is called by the builders before save.
+	contact.PhoneValidator = func() func(string) error {
+		validators := contactDescPhone.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(phone string) error {
+			for _, fn := range fns {
+				if err := fn(phone); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// contactDescCreatedAt is the schema descriptor for created_at field.
+	contactDescCreatedAt := contactFields[5].Descriptor()
+	// contact.DefaultCreatedAt holds the default value on creation for the created_at field.
+	contact.DefaultCreatedAt = contactDescCreatedAt.Default.(func() time.Time)
+	// contactDescUpdatedAt is the schema descriptor for updated_at field.
+	contactDescUpdatedAt := contactFields[6].Descriptor()
+	// contact.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	contact.DefaultUpdatedAt = contactDescUpdatedAt.Default.(func() time.Time)
+	// contact.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	contact.UpdateDefaultUpdatedAt = contactDescUpdatedAt.UpdateDefault.(func() time.Time)
+	propertyFields := schema.Property{}.Fields()
+	_ = propertyFields
+	// propertyDescTitle is the schema descriptor for title field.
+	propertyDescTitle := propertyFields[0].Descriptor()
+	// property.TitleValidator is a validator for the "title" field. It is called by the builders before save.
+	property.TitleValidator = func() func(string) error {
+		validators := propertyDescTitle.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(title string) error {
+			for _, fn := range fns {
+				if err := fn(title); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// propertyDescDescription is the schema descriptor for description field.
+	propertyDescDescription := propertyFields[1].Descriptor()
+	// property.DescriptionValidator is a validator for the "description" field. It is called by the builders before save.
+	property.DescriptionValidator = propertyDescDescription.Validators[0].(func(string) error)
+	// propertyDescPrice is the schema descriptor for price field.
+	propertyDescPrice := propertyFields[3].Descriptor()
+	// property.PriceValidator is a validator for the "price" field. It is called by the builders before save.
+	property.PriceValidator = propertyDescPrice.Validators[0].(func(float64) error)
+	// propertyDescIsPublished is the schema descriptor for is_published field.
+	propertyDescIsPublished := propertyFields[5].Descriptor()
+	// property.DefaultIsPublished holds the default value on creation for the is_published field.
+	property.DefaultIsPublished = propertyDescIsPublished.Default.(bool)
+	// propertyDescAddress is the schema descriptor for address field.
+	propertyDescAddress := propertyFields[6].Descriptor()
+	// property.AddressValidator is a validator for the "address" field. It is called by the builders before save.
+	property.AddressValidator = func() func(string) error {
+		validators := propertyDescAddress.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(address string) error {
+			for _, fn := range fns {
+				if err := fn(address); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// propertyDescDistrict is the schema descriptor for district field.
+	propertyDescDistrict := propertyFields[7].Descriptor()
+	// property.DistrictValidator is a validator for the "district" field. It is called by the builders before save.
+	property.DistrictValidator = func() func(string) error {
+		validators := propertyDescDistrict.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(district string) error {
+			for _, fn := range fns {
+				if err := fn(district); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// propertyDescMunicipality is the schema descriptor for municipality field.
+	propertyDescMunicipality := propertyFields[8].Descriptor()
+	// property.MunicipalityValidator is a validator for the "municipality" field. It is called by the builders before save.
+	property.MunicipalityValidator = func() func(string) error {
+		validators := propertyDescMunicipality.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(municipality string) error {
+			for _, fn := range fns {
+				if err := fn(municipality); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// propertyDescParish is the schema descriptor for parish field.
+	propertyDescParish := propertyFields[9].Descriptor()
+	// property.ParishValidator is a validator for the "parish" field. It is called by the builders before save.
+	property.ParishValidator = propertyDescParish.Validators[0].(func(string) error)
+	// propertyDescPostalCode is the schema descriptor for postal_code field.
+	propertyDescPostalCode := propertyFields[10].Descriptor()
+	// property.PostalCodeValidator is a validator for the "postal_code" field. It is called by the builders before save.
+	property.PostalCodeValidator = propertyDescPostalCode.Validators[0].(func(string) error)
+	// propertyDescCountry is the schema descriptor for country field.
+	propertyDescCountry := propertyFields[11].Descriptor()
+	// property.DefaultCountry holds the default value on creation for the country field.
+	property.DefaultCountry = propertyDescCountry.Default.(string)
+	// property.CountryValidator is a validator for the "country" field. It is called by the builders before save.
+	property.CountryValidator = propertyDescCountry.Validators[0].(func(string) error)
+	// propertyDescBedrooms is the schema descriptor for bedrooms field.
+	propertyDescBedrooms := propertyFields[14].Descriptor()
+	// property.BedroomsValidator is a validator for the "bedrooms" field. It is called by the builders before save.
+	property.BedroomsValidator = propertyDescBedrooms.Validators[0].(func(int) error)
+	// propertyDescBathrooms is the schema descriptor for bathrooms field.
+	propertyDescBathrooms := propertyFields[15].Descriptor()
+	// property.BathroomsValidator is a validator for the "bathrooms" field. It is called by the builders before save.
+	property.BathroomsValidator = propertyDescBathrooms.Validators[0].(func(int) error)
+	// propertyDescAreaSqm is the schema descriptor for area_sqm field.
+	propertyDescAreaSqm := propertyFields[16].Descriptor()
+	// property.AreaSqmValidator is a validator for the "area_sqm" field. It is called by the builders before save.
+	property.AreaSqmValidator = propertyDescAreaSqm.Validators[0].(func(float64) error)
+	// propertyDescLandAreaSqm is the schema descriptor for land_area_sqm field.
+	propertyDescLandAreaSqm := propertyFields[17].Descriptor()
+	// property.LandAreaSqmValidator is a validator for the "land_area_sqm" field. It is called by the builders before save.
+	property.LandAreaSqmValidator = propertyDescLandAreaSqm.Validators[0].(func(float64) error)
+	// propertyDescParkingSpaces is the schema descriptor for parking_spaces field.
+	propertyDescParkingSpaces := propertyFields[21].Descriptor()
+	// property.ParkingSpacesValidator is a validator for the "parking_spaces" field. It is called by the builders before save.
+	property.ParkingSpacesValidator = propertyDescParkingSpaces.Validators[0].(func(int) error)
+	// propertyDescHasGarage is the schema descriptor for has_garage field.
+	propertyDescHasGarage := propertyFields[22].Descriptor()
+	// property.DefaultHasGarage holds the default value on creation for the has_garage field.
+	property.DefaultHasGarage = propertyDescHasGarage.Default.(bool)
+	// propertyDescHasGarden is the schema descriptor for has_garden field.
+	propertyDescHasGarden := propertyFields[23].Descriptor()
+	// property.DefaultHasGarden holds the default value on creation for the has_garden field.
+	property.DefaultHasGarden = propertyDescHasGarden.Default.(bool)
+	// propertyDescHasPool is the schema descriptor for has_pool field.
+	propertyDescHasPool := propertyFields[24].Descriptor()
+	// property.DefaultHasPool holds the default value on creation for the has_pool field.
+	property.DefaultHasPool = propertyDescHasPool.Default.(bool)
+	// propertyDescHasElevator is the schema descriptor for has_elevator field.
+	propertyDescHasElevator := propertyFields[25].Descriptor()
+	// property.DefaultHasElevator holds the default value on creation for the has_elevator field.
+	property.DefaultHasElevator = propertyDescHasElevator.Default.(bool)
+	// propertyDescVirtualTourURL is the schema descriptor for virtual_tour_url field.
+	propertyDescVirtualTourURL := propertyFields[27].Descriptor()
+	// property.VirtualTourURLValidator is a validator for the "virtual_tour_url" field. It is called by the builders before save.
+	property.VirtualTourURLValidator = propertyDescVirtualTourURL.Validators[0].(func(string) error)
+	// propertyDescContactID is the schema descriptor for contact_id field.
+	propertyDescContactID := propertyFields[28].Descriptor()
+	// property.ContactIDValidator is a validator for the "contact_id" field. It is called by the builders before save.
+	property.ContactIDValidator = propertyDescContactID.Validators[0].(func(int) error)
+	// propertyDescPublisherID is the schema descriptor for publisher_id field.
+	propertyDescPublisherID := propertyFields[29].Descriptor()
+	// property.PublisherIDValidator is a validator for the "publisher_id" field. It is called by the builders before save.
+	property.PublisherIDValidator = propertyDescPublisherID.Validators[0].(func(int) error)
+	// propertyDescViewCount is the schema descriptor for view_count field.
+	propertyDescViewCount := propertyFields[30].Descriptor()
+	// property.DefaultViewCount holds the default value on creation for the view_count field.
+	property.DefaultViewCount = propertyDescViewCount.Default.(int)
+	// property.ViewCountValidator is a validator for the "view_count" field. It is called by the builders before save.
+	property.ViewCountValidator = propertyDescViewCount.Validators[0].(func(int) error)
+	// propertyDescCreatedAt is the schema descriptor for created_at field.
+	propertyDescCreatedAt := propertyFields[32].Descriptor()
+	// property.DefaultCreatedAt holds the default value on creation for the created_at field.
+	property.DefaultCreatedAt = propertyDescCreatedAt.Default.(func() time.Time)
+	// propertyDescUpdatedAt is the schema descriptor for updated_at field.
+	propertyDescUpdatedAt := propertyFields[33].Descriptor()
+	// property.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	property.DefaultUpdatedAt = propertyDescUpdatedAt.Default.(func() time.Time)
+	// property.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	property.UpdateDefaultUpdatedAt = propertyDescUpdatedAt.UpdateDefault.(func() time.Time)
+	propertyimageFields := schema.PropertyImage{}.Fields()
+	_ = propertyimageFields
+	// propertyimageDescPropertyID is the schema descriptor for property_id field.
+	propertyimageDescPropertyID := propertyimageFields[0].Descriptor()
+	// propertyimage.PropertyIDValidator is a validator for the "property_id" field. It is called by the builders before save.
+	propertyimage.PropertyIDValidator = propertyimageDescPropertyID.Validators[0].(func(int) error)
+	// propertyimageDescImageData is the schema descriptor for image_data field.
+	propertyimageDescImageData := propertyimageFields[1].Descriptor()
+	// propertyimage.ImageDataValidator is a validator for the "image_data" field. It is called by the builders before save.
+	propertyimage.ImageDataValidator = propertyimageDescImageData.Validators[0].(func([]byte) error)
+	// propertyimageDescContentType is the schema descriptor for content_type field.
+	propertyimageDescContentType := propertyimageFields[2].Descriptor()
+	// propertyimage.ContentTypeValidator is a validator for the "content_type" field. It is called by the builders before save.
+	propertyimage.ContentTypeValidator = func() func(string) error {
+		validators := propertyimageDescContentType.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(content_type string) error {
+			for _, fn := range fns {
+				if err := fn(content_type); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// propertyimageDescFileSize is the schema descriptor for file_size field.
+	propertyimageDescFileSize := propertyimageFields[3].Descriptor()
+	// propertyimage.FileSizeValidator is a validator for the "file_size" field. It is called by the builders before save.
+	propertyimage.FileSizeValidator = propertyimageDescFileSize.Validators[0].(func(int) error)
+	// propertyimageDescWidth is the schema descriptor for width field.
+	propertyimageDescWidth := propertyimageFields[4].Descriptor()
+	// propertyimage.WidthValidator is a validator for the "width" field. It is called by the builders before save.
+	propertyimage.WidthValidator = propertyimageDescWidth.Validators[0].(func(int) error)
+	// propertyimageDescHeight is the schema descriptor for height field.
+	propertyimageDescHeight := propertyimageFields[5].Descriptor()
+	// propertyimage.HeightValidator is a validator for the "height" field. It is called by the builders before save.
+	propertyimage.HeightValidator = propertyimageDescHeight.Validators[0].(func(int) error)
+	// propertyimageDescDisplayOrder is the schema descriptor for display_order field.
+	propertyimageDescDisplayOrder := propertyimageFields[6].Descriptor()
+	// propertyimage.DefaultDisplayOrder holds the default value on creation for the display_order field.
+	propertyimage.DefaultDisplayOrder = propertyimageDescDisplayOrder.Default.(int)
+	// propertyimage.DisplayOrderValidator is a validator for the "display_order" field. It is called by the builders before save.
+	propertyimage.DisplayOrderValidator = propertyimageDescDisplayOrder.Validators[0].(func(int) error)
+	// propertyimageDescCreatedAt is the schema descriptor for created_at field.
+	propertyimageDescCreatedAt := propertyimageFields[7].Descriptor()
+	// propertyimage.DefaultCreatedAt holds the default value on creation for the created_at field.
+	propertyimage.DefaultCreatedAt = propertyimageDescCreatedAt.Default.(func() time.Time)
+	ratelimitFields := schema.RateLimit{}.Fields()
+	_ = ratelimitFields
+	// ratelimitDescEmail is the schema descriptor for email field.
+	ratelimitDescEmail := ratelimitFields[0].Descriptor()
+	// ratelimit.EmailValidator is a validator for the "email" field. It is called by the builders before save.
+	ratelimit.EmailValidator = ratelimitDescEmail.Validators[0].(func(string) error)
+	// ratelimitDescIPAddress is the schema descriptor for ip_address field.
+	ratelimitDescIPAddress := ratelimitFields[1].Descriptor()
+	// ratelimit.IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
+	ratelimit.IPAddressValidator = ratelimitDescIPAddress.Validators[0].(func(string) error)
+	// ratelimitDescAction is the schema descriptor for action field.
+	ratelimitDescAction := ratelimitFields[2].Descriptor()
+	// ratelimit.ActionValidator is a validator for the "action" field. It is called by the builders before save.
+	ratelimit.ActionValidator = ratelimitDescAction.Validators[0].(func(string) error)
+	// ratelimitDescAttemptCount is the schema descriptor for attempt_count field.
+	ratelimitDescAttemptCount := ratelimitFields[3].Descriptor()
+	// ratelimit.DefaultAttemptCount holds the default value on creation for the attempt_count field.
+	ratelimit.DefaultAttemptCount = ratelimitDescAttemptCount.Default.(int)
+	// ratelimitDescWindowStart is the schema descriptor for window_start field.
+	ratelimitDescWindowStart := ratelimitFields[4].Descriptor()
+	// ratelimit.DefaultWindowStart holds the default value on creation for the window_start field.
+	ratelimit.DefaultWindowStart = ratelimitDescWindowStart.Default.(func() time.Time)
+	// ratelimitDescCreatedAt is the schema descriptor for created_at field.
+	ratelimitDescCreatedAt := ratelimitFields[6].Descriptor()
+	// ratelimit.DefaultCreatedAt holds the default value on creation for the created_at field.
+	ratelimit.DefaultCreatedAt = ratelimitDescCreatedAt.Default.(func() time.Time)
+	// ratelimitDescUpdatedAt is the schema descriptor for updated_at field.
+	ratelimitDescUpdatedAt := ratelimitFields[7].Descriptor()
+	// ratelimit.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	ratelimit.DefaultUpdatedAt = ratelimitDescUpdatedAt.Default.(func() time.Time)
+	// ratelimit.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	ratelimit.UpdateDefaultUpdatedAt = ratelimitDescUpdatedAt.UpdateDefault.(func() time.Time)
 	sessionFields := schema.Session{}.Fields()
 	_ = sessionFields
 	// sessionDescUserID is the schema descriptor for user_id field.
@@ -128,12 +475,16 @@ func init() {
 	userDescIsActive := userFields[3].Descriptor()
 	// user.DefaultIsActive holds the default value on creation for the is_active field.
 	user.DefaultIsActive = userDescIsActive.Default.(bool)
+	// userDescIsSuperUser is the schema descriptor for is_super_user field.
+	userDescIsSuperUser := userFields[4].Descriptor()
+	// user.DefaultIsSuperUser holds the default value on creation for the is_super_user field.
+	user.DefaultIsSuperUser = userDescIsSuperUser.Default.(bool)
 	// userDescCreatedAt is the schema descriptor for created_at field.
-	userDescCreatedAt := userFields[4].Descriptor()
+	userDescCreatedAt := userFields[5].Descriptor()
 	// user.DefaultCreatedAt holds the default value on creation for the created_at field.
 	user.DefaultCreatedAt = userDescCreatedAt.Default.(func() time.Time)
 	// userDescUpdatedAt is the schema descriptor for updated_at field.
-	userDescUpdatedAt := userFields[5].Descriptor()
+	userDescUpdatedAt := userFields[6].Descriptor()
 	// user.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	user.DefaultUpdatedAt = userDescUpdatedAt.Default.(func() time.Time)
 	// user.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
@@ -148,26 +499,12 @@ func init() {
 	userauthDescHash := userauthFields[1].Descriptor()
 	// userauth.HashValidator is a validator for the "hash" field. It is called by the builders before save.
 	userauth.HashValidator = userauthDescHash.Validators[0].(func(string) error)
-	// userauthDescIsLocked is the schema descriptor for is_locked field.
-	userauthDescIsLocked := userauthFields[2].Descriptor()
-	// userauth.DefaultIsLocked holds the default value on creation for the is_locked field.
-	userauth.DefaultIsLocked = userauthDescIsLocked.Default.(bool)
-	// userauthDescLockedReason is the schema descriptor for locked_reason field.
-	userauthDescLockedReason := userauthFields[3].Descriptor()
-	// userauth.LockedReasonValidator is a validator for the "locked_reason" field. It is called by the builders before save.
-	userauth.LockedReasonValidator = userauthDescLockedReason.Validators[0].(func(string) error)
-	// userauthDescFailedLoginAttempts is the schema descriptor for failed_login_attempts field.
-	userauthDescFailedLoginAttempts := userauthFields[4].Descriptor()
-	// userauth.DefaultFailedLoginAttempts holds the default value on creation for the failed_login_attempts field.
-	userauth.DefaultFailedLoginAttempts = userauthDescFailedLoginAttempts.Default.(int)
-	// userauth.FailedLoginAttemptsValidator is a validator for the "failed_login_attempts" field. It is called by the builders before save.
-	userauth.FailedLoginAttemptsValidator = userauthDescFailedLoginAttempts.Validators[0].(func(int) error)
 	// userauthDescCreatedAt is the schema descriptor for created_at field.
-	userauthDescCreatedAt := userauthFields[7].Descriptor()
+	userauthDescCreatedAt := userauthFields[3].Descriptor()
 	// userauth.DefaultCreatedAt holds the default value on creation for the created_at field.
 	userauth.DefaultCreatedAt = userauthDescCreatedAt.Default.(func() time.Time)
 	// userauthDescUpdatedAt is the schema descriptor for updated_at field.
-	userauthDescUpdatedAt := userauthFields[8].Descriptor()
+	userauthDescUpdatedAt := userauthFields[4].Descriptor()
 	// userauth.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	userauth.DefaultUpdatedAt = userauthDescUpdatedAt.Default.(func() time.Time)
 	// userauth.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.

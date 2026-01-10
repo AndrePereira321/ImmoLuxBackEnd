@@ -26,6 +26,8 @@ type User struct {
 	Email string `json:"email,omitempty"`
 	// IsActive holds the value of the "is_active" field.
 	IsActive bool `json:"is_active,omitempty"`
+	// IsSuperUser holds the value of the "is_super_user" field.
+	IsSuperUser bool `json:"is_super_user,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// UpdatedAt holds the value of the "updated_at" field.
@@ -42,9 +44,15 @@ type UserEdges struct {
 	Auth *UserAuth `json:"auth,omitempty"`
 	// Sessions holds the value of the sessions edge.
 	Sessions []*Session `json:"sessions,omitempty"`
+	// Properties holds the value of the properties edge.
+	Properties []*Property `json:"properties,omitempty"`
+	// Contacts holds the value of the contacts edge.
+	Contacts []*Contact `json:"contacts,omitempty"`
+	// AuthLogs holds the value of the auth_logs edge.
+	AuthLogs []*AuthLog `json:"auth_logs,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [2]bool
+	loadedTypes [5]bool
 }
 
 // AuthOrErr returns the Auth value or an error if the edge
@@ -67,12 +75,39 @@ func (e UserEdges) SessionsOrErr() ([]*Session, error) {
 	return nil, &NotLoadedError{edge: "sessions"}
 }
 
+// PropertiesOrErr returns the Properties value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) PropertiesOrErr() ([]*Property, error) {
+	if e.loadedTypes[2] {
+		return e.Properties, nil
+	}
+	return nil, &NotLoadedError{edge: "properties"}
+}
+
+// ContactsOrErr returns the Contacts value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) ContactsOrErr() ([]*Contact, error) {
+	if e.loadedTypes[3] {
+		return e.Contacts, nil
+	}
+	return nil, &NotLoadedError{edge: "contacts"}
+}
+
+// AuthLogsOrErr returns the AuthLogs value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) AuthLogsOrErr() ([]*AuthLog, error) {
+	if e.loadedTypes[4] {
+		return e.AuthLogs, nil
+	}
+	return nil, &NotLoadedError{edge: "auth_logs"}
+}
+
 // scanValues returns the types for scanning values from sql.Rows.
 func (*User) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case user.FieldIsActive:
+		case user.FieldIsActive, user.FieldIsSuperUser:
 			values[i] = new(sql.NullBool)
 		case user.FieldID:
 			values[i] = new(sql.NullInt64)
@@ -125,6 +160,12 @@ func (_m *User) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.IsActive = value.Bool
 			}
+		case user.FieldIsSuperUser:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field is_super_user", values[i])
+			} else if value.Valid {
+				_m.IsSuperUser = value.Bool
+			}
 		case user.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field created_at", values[i])
@@ -158,6 +199,21 @@ func (_m *User) QueryAuth() *UserAuthQuery {
 // QuerySessions queries the "sessions" edge of the User entity.
 func (_m *User) QuerySessions() *SessionQuery {
 	return NewUserClient(_m.config).QuerySessions(_m)
+}
+
+// QueryProperties queries the "properties" edge of the User entity.
+func (_m *User) QueryProperties() *PropertyQuery {
+	return NewUserClient(_m.config).QueryProperties(_m)
+}
+
+// QueryContacts queries the "contacts" edge of the User entity.
+func (_m *User) QueryContacts() *ContactQuery {
+	return NewUserClient(_m.config).QueryContacts(_m)
+}
+
+// QueryAuthLogs queries the "auth_logs" edge of the User entity.
+func (_m *User) QueryAuthLogs() *AuthLogQuery {
+	return NewUserClient(_m.config).QueryAuthLogs(_m)
 }
 
 // Update returns a builder for updating this User.
@@ -194,6 +250,9 @@ func (_m *User) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("is_active=")
 	builder.WriteString(fmt.Sprintf("%v", _m.IsActive))
+	builder.WriteString(", ")
+	builder.WriteString("is_super_user=")
+	builder.WriteString(fmt.Sprintf("%v", _m.IsSuperUser))
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))

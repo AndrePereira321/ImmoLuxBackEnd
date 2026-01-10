@@ -50,6 +50,21 @@ func Login(ctx *RouteContext) error {
 		return ctx.BadRequest(fmt.Sprintf("Password must be at least %d characters long", models.PasswordMinLength))
 	}
 
+	ipAddress := ctx.Ctx().IP()
+	userAgent := ctx.Ctx().Get("User-Agent")
+
+	rateLimitRepo := ctx.Db().NewRateLimitRepository()
+	allowed, blockedUntil, err := rateLimitRepo.CheckRateLimit(ctx.Ctx().Context(), payload.Email, ipAddress, "LOGIN")
+	if err != nil {
+		ctx.Logger().Warn(fmt.Sprintf("Rate limit check error: %s", err.Error()))
+	}
+
+	if !allowed && blockedUntil != nil {
+		ctx.Logger().Warn(fmt.Sprintf("Login blocked for %s from IP %s until %s", payload.Email, ipAddress, blockedUntil.Format(time.RFC3339)))
+		return ctx.RespondError(fiber.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED",
+			fmt.Sprintf("Too many login attempts. Try again after %s", blockedUntil.Format(time.RFC3339)))
+	}
+
 	userDto, userAuthDto, err := ctx.Db().NewUserRepository().GetUserAuth(payload.Email)
 	if err != nil {
 		if server_error.IsServerError(err, "USER_NOT_FOUND") {
@@ -59,25 +74,21 @@ func Login(ctx *RouteContext) error {
 		return err
 	}
 
-	if *userAuthDto.IsLocked {
-		reason := "Account is locked"
-		if userAuthDto.LockedReason != nil {
-			reason = *userAuthDto.LockedReason
-		}
-		return ctx.RespondError(fiber.StatusForbidden, "USER_LOCKED", reason)
-	}
+	authLogRepo := ctx.Db().NewAuthLogRepository()
 
 	err = bcrypt.CompareHashAndPassword([]byte(*userAuthDto.Hash), []byte(payload.Password))
 	if err != nil {
 		ctx.Logger().Trace(fmt.Sprintf("Invalid password attempt for user: %s", payload.Email))
 
-		txErr := ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-			return ctx.Db().NewUserRepository().IncrementFailedAttempts(txCtx, tx, *userDto.ID)
+		failureReason := "Invalid password"
+		_ = authLogRepo.LogAuthEvent(ctx.Ctx().Context(), database.LogAuthEventParams{
+			UserID:        userDto.ID,
+			Email:         payload.Email,
+			EventType:     "LOGIN_FAILED",
+			IpAddress:     &ipAddress,
+			UserAgent:     &userAgent,
+			FailureReason: &failureReason,
 		})
-
-		if txErr != nil {
-			ctx.Logger().Warn(fmt.Sprintf("Failed to increment failed attempts: %s", txErr.Error()))
-		}
 
 		return ctx.RespondError(fiber.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password")
 	}
@@ -86,14 +97,7 @@ func Login(ctx *RouteContext) error {
 	var jwtToken string
 
 	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		if err := ctx.Db().NewUserRepository().ResetFailedAttempts(txCtx, tx, *userDto.ID); err != nil {
-			return err
-		}
-
 		expiresAt := utils.CalculateExpiration(payload.RememberMe)
-		ipAddress := ctx.Ctx().IP()
-		userAgent := ctx.Ctx().Get("User-Agent")
-
 		tokenHash := utils.HashToken(fmt.Sprintf("%d-%d-%s", *userDto.ID, time.Now().UnixNano(), ipAddress))
 
 		createdSessionId, err := ctx.Db().NewSessionRepository().CreateSession(txCtx, tx, database.CreateSessionParams{
@@ -123,6 +127,16 @@ func Login(ctx *RouteContext) error {
 		ctx.Logger().Error(fmt.Sprintf("Failed to create session for user %s: %s", payload.Email, err.Error()))
 		return ctx.RespondError(fiber.StatusInternalServerError, "SESSION_CREATE_ERROR", "Failed to create session")
 	}
+
+	_ = rateLimitRepo.ResetRateLimit(ctx.Ctx().Context(), payload.Email, ipAddress, "LOGIN")
+
+	_ = authLogRepo.LogAuthEvent(ctx.Ctx().Context(), database.LogAuthEventParams{
+		UserID:    userDto.ID,
+		Email:     payload.Email,
+		EventType: "LOGIN_SUCCESS",
+		IpAddress: &ipAddress,
+		UserAgent: &userAgent,
+	})
 
 	cookie := createSessionCookie(jwtToken, payload.RememberMe, ctx.ServerConfig())
 	ctx.Ctx().Cookie(cookie)
@@ -183,6 +197,20 @@ func Logout(ctx *RouteContext) error {
 
 	clearSessionCookie(ctx.Ctx(), ctx.ServerConfig())
 
+	ipAddress := ctx.Ctx().IP()
+	userAgent := ctx.Ctx().Get("User-Agent")
+
+	if userDto != nil && userDto.Email != nil {
+		authLogRepo := ctx.Db().NewAuthLogRepository()
+		_ = authLogRepo.LogAuthEvent(ctx.Ctx().Context(), database.LogAuthEventParams{
+			UserID:    userDto.ID,
+			Email:     *userDto.Email,
+			EventType: "LOGOUT",
+			IpAddress: &ipAddress,
+			UserAgent: &userAgent,
+		})
+	}
+
 	logEvent := ctx.Logger().InfoEvent().Int64("sessionId", int64(sessionId))
 	if userDto != nil && userDto.Email != nil {
 		logEvent.Str("email", *userDto.Email)
@@ -211,5 +239,14 @@ func createSessionCookie(token string, rememberMe bool, cfg *config.ServerConfig
 }
 
 func clearSessionCookie(ctx fiber.Ctx, cfg *config.ServerConfig) {
-	ctx.ClearCookie(config.SessionCookieName)
+	cookieSecure := cfg.Security().CookieSecure()
+	ctx.Cookie(&fiber.Cookie{
+		Name:     config.SessionCookieName,
+		Value:    "",
+		Expires:  time.Unix(0, 0), // January 1, 1970
+		HTTPOnly: true,
+		Secure:   cookieSecure,
+		SameSite: fiber.CookieSameSiteStrictMode,
+		Path:     "/",
+	})
 }

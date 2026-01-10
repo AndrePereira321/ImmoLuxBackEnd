@@ -6,6 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"immo-lux/internal/database/ent/client/authlog"
+	"immo-lux/internal/database/ent/client/contact"
+	"immo-lux/internal/database/ent/client/property"
+	"immo-lux/internal/database/ent/client/propertyimage"
+	"immo-lux/internal/database/ent/client/ratelimit"
 	"immo-lux/internal/database/ent/client/session"
 	"immo-lux/internal/database/ent/client/user"
 	"immo-lux/internal/database/ent/client/userauth"
@@ -75,9 +80,14 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			session.Table:  session.ValidColumn,
-			user.Table:     user.ValidColumn,
-			userauth.Table: userauth.ValidColumn,
+			authlog.Table:       authlog.ValidColumn,
+			contact.Table:       contact.ValidColumn,
+			property.Table:      property.ValidColumn,
+			propertyimage.Table: propertyimage.ValidColumn,
+			ratelimit.Table:     ratelimit.ValidColumn,
+			session.Table:       session.ValidColumn,
+			user.Table:          user.ValidColumn,
+			userauth.Table:      userauth.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

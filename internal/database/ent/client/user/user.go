@@ -22,6 +22,8 @@ const (
 	FieldEmail = "email"
 	// FieldIsActive holds the string denoting the is_active field in the database.
 	FieldIsActive = "is_active"
+	// FieldIsSuperUser holds the string denoting the is_super_user field in the database.
+	FieldIsSuperUser = "is_super_user"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// FieldUpdatedAt holds the string denoting the updated_at field in the database.
@@ -30,6 +32,12 @@ const (
 	EdgeAuth = "auth"
 	// EdgeSessions holds the string denoting the sessions edge name in mutations.
 	EdgeSessions = "sessions"
+	// EdgeProperties holds the string denoting the properties edge name in mutations.
+	EdgeProperties = "properties"
+	// EdgeContacts holds the string denoting the contacts edge name in mutations.
+	EdgeContacts = "contacts"
+	// EdgeAuthLogs holds the string denoting the auth_logs edge name in mutations.
+	EdgeAuthLogs = "auth_logs"
 	// Table holds the table name of the user in the database.
 	Table = "users"
 	// AuthTable is the table that holds the auth relation/edge.
@@ -46,6 +54,27 @@ const (
 	SessionsInverseTable = "sessions"
 	// SessionsColumn is the table column denoting the sessions relation/edge.
 	SessionsColumn = "user_id"
+	// PropertiesTable is the table that holds the properties relation/edge.
+	PropertiesTable = "properties"
+	// PropertiesInverseTable is the table name for the Property entity.
+	// It exists in this package in order to avoid circular dependency with the "property" package.
+	PropertiesInverseTable = "properties"
+	// PropertiesColumn is the table column denoting the properties relation/edge.
+	PropertiesColumn = "publisher_id"
+	// ContactsTable is the table that holds the contacts relation/edge.
+	ContactsTable = "contacts"
+	// ContactsInverseTable is the table name for the Contact entity.
+	// It exists in this package in order to avoid circular dependency with the "contact" package.
+	ContactsInverseTable = "contacts"
+	// ContactsColumn is the table column denoting the contacts relation/edge.
+	ContactsColumn = "user_id"
+	// AuthLogsTable is the table that holds the auth_logs relation/edge.
+	AuthLogsTable = "auth_logs"
+	// AuthLogsInverseTable is the table name for the AuthLog entity.
+	// It exists in this package in order to avoid circular dependency with the "authlog" package.
+	AuthLogsInverseTable = "auth_logs"
+	// AuthLogsColumn is the table column denoting the auth_logs relation/edge.
+	AuthLogsColumn = "user_id"
 )
 
 // Columns holds all SQL columns for user fields.
@@ -55,6 +84,7 @@ var Columns = []string{
 	FieldLastName,
 	FieldEmail,
 	FieldIsActive,
+	FieldIsSuperUser,
 	FieldCreatedAt,
 	FieldUpdatedAt,
 }
@@ -78,6 +108,8 @@ var (
 	EmailValidator func(string) error
 	// DefaultIsActive holds the default value on creation for the "is_active" field.
 	DefaultIsActive bool
+	// DefaultIsSuperUser holds the default value on creation for the "is_super_user" field.
+	DefaultIsSuperUser bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 	// DefaultUpdatedAt holds the default value on creation for the "updated_at" field.
@@ -114,6 +146,11 @@ func ByIsActive(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsActive, opts...).ToFunc()
 }
 
+// ByIsSuperUser orders the results by the is_super_user field.
+func ByIsSuperUser(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldIsSuperUser, opts...).ToFunc()
+}
+
 // ByCreatedAt orders the results by the created_at field.
 func ByCreatedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCreatedAt, opts...).ToFunc()
@@ -144,6 +181,48 @@ func BySessions(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newSessionsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByPropertiesCount orders the results by properties count.
+func ByPropertiesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newPropertiesStep(), opts...)
+	}
+}
+
+// ByProperties orders the results by properties terms.
+func ByProperties(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newPropertiesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByContactsCount orders the results by contacts count.
+func ByContactsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newContactsStep(), opts...)
+	}
+}
+
+// ByContacts orders the results by contacts terms.
+func ByContacts(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newContactsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByAuthLogsCount orders the results by auth_logs count.
+func ByAuthLogsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAuthLogsStep(), opts...)
+	}
+}
+
+// ByAuthLogs orders the results by auth_logs terms.
+func ByAuthLogs(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAuthLogsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newAuthStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -156,5 +235,26 @@ func newSessionsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(SessionsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, SessionsTable, SessionsColumn),
+	)
+}
+func newPropertiesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(PropertiesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, PropertiesTable, PropertiesColumn),
+	)
+}
+func newContactsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(ContactsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, ContactsTable, ContactsColumn),
+	)
+}
+func newAuthLogsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(AuthLogsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, AuthLogsTable, AuthLogsColumn),
 	)
 }

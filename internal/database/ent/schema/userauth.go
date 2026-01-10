@@ -17,10 +17,6 @@ func (UserAuth) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int("user_id").Unique().Positive(),
 		field.String("hash").NotEmpty().Sensitive(),
-		field.Bool("is_locked").Default(false),
-		field.String("locked_reason").Optional().Nillable().MaxLen(500),
-		field.Int("failed_login_attempts").Default(0).NonNegative(),
-		field.Time("last_failed_attempt").Optional().Nillable(),
 		field.Time("password_changed_at").Optional().Nillable(),
 		field.Time("created_at").Default(time.Now).Immutable(),
 		field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now),

@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"immo-lux/internal/database/ent/client/authlog"
+	"immo-lux/internal/database/ent/client/contact"
+	"immo-lux/internal/database/ent/client/property"
 	"immo-lux/internal/database/ent/client/session"
 	"immo-lux/internal/database/ent/client/user"
 	"immo-lux/internal/database/ent/client/userauth"
@@ -50,6 +53,20 @@ func (_c *UserCreate) SetIsActive(v bool) *UserCreate {
 func (_c *UserCreate) SetNillableIsActive(v *bool) *UserCreate {
 	if v != nil {
 		_c.SetIsActive(*v)
+	}
+	return _c
+}
+
+// SetIsSuperUser sets the "is_super_user" field.
+func (_c *UserCreate) SetIsSuperUser(v bool) *UserCreate {
+	_c.mutation.SetIsSuperUser(v)
+	return _c
+}
+
+// SetNillableIsSuperUser sets the "is_super_user" field if the given value is not nil.
+func (_c *UserCreate) SetNillableIsSuperUser(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetIsSuperUser(*v)
 	}
 	return _c
 }
@@ -116,6 +133,51 @@ func (_c *UserCreate) AddSessions(v ...*Session) *UserCreate {
 	return _c.AddSessionIDs(ids...)
 }
 
+// AddPropertyIDs adds the "properties" edge to the Property entity by IDs.
+func (_c *UserCreate) AddPropertyIDs(ids ...int) *UserCreate {
+	_c.mutation.AddPropertyIDs(ids...)
+	return _c
+}
+
+// AddProperties adds the "properties" edges to the Property entity.
+func (_c *UserCreate) AddProperties(v ...*Property) *UserCreate {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddPropertyIDs(ids...)
+}
+
+// AddContactIDs adds the "contacts" edge to the Contact entity by IDs.
+func (_c *UserCreate) AddContactIDs(ids ...int) *UserCreate {
+	_c.mutation.AddContactIDs(ids...)
+	return _c
+}
+
+// AddContacts adds the "contacts" edges to the Contact entity.
+func (_c *UserCreate) AddContacts(v ...*Contact) *UserCreate {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddContactIDs(ids...)
+}
+
+// AddAuthLogIDs adds the "auth_logs" edge to the AuthLog entity by IDs.
+func (_c *UserCreate) AddAuthLogIDs(ids ...int) *UserCreate {
+	_c.mutation.AddAuthLogIDs(ids...)
+	return _c
+}
+
+// AddAuthLogs adds the "auth_logs" edges to the AuthLog entity.
+func (_c *UserCreate) AddAuthLogs(v ...*AuthLog) *UserCreate {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddAuthLogIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_c *UserCreate) Mutation() *UserMutation {
 	return _c.mutation
@@ -155,6 +217,10 @@ func (_c *UserCreate) defaults() {
 		v := user.DefaultIsActive
 		_c.mutation.SetIsActive(v)
 	}
+	if _, ok := _c.mutation.IsSuperUser(); !ok {
+		v := user.DefaultIsSuperUser
+		_c.mutation.SetIsSuperUser(v)
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := user.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
@@ -193,6 +259,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsActive(); !ok {
 		return &ValidationError{Name: "is_active", err: errors.New(`client: missing required field "User.is_active"`)}
+	}
+	if _, ok := _c.mutation.IsSuperUser(); !ok {
+		return &ValidationError{Name: "is_super_user", err: errors.New(`client: missing required field "User.is_super_user"`)}
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`client: missing required field "User.created_at"`)}
@@ -242,6 +311,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 		_spec.SetField(user.FieldIsActive, field.TypeBool, value)
 		_node.IsActive = value
 	}
+	if value, ok := _c.mutation.IsSuperUser(); ok {
+		_spec.SetField(user.FieldIsSuperUser, field.TypeBool, value)
+		_node.IsSuperUser = value
+	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(user.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
@@ -275,6 +348,54 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(session.FieldID, field.TypeInt),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.PropertiesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.PropertiesTable,
+			Columns: []string{user.PropertiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(property.FieldID, field.TypeInt),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.ContactsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ContactsTable,
+			Columns: []string{user.ContactsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.AuthLogsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.AuthLogsTable,
+			Columns: []string{user.AuthLogsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(authlog.FieldID, field.TypeInt),
 			},
 		}
 		for _, k := range nodes {

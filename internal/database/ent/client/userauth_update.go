@@ -57,81 +57,6 @@ func (_u *UserAuthUpdate) SetNillableHash(v *string) *UserAuthUpdate {
 	return _u
 }
 
-// SetIsLocked sets the "is_locked" field.
-func (_u *UserAuthUpdate) SetIsLocked(v bool) *UserAuthUpdate {
-	_u.mutation.SetIsLocked(v)
-	return _u
-}
-
-// SetNillableIsLocked sets the "is_locked" field if the given value is not nil.
-func (_u *UserAuthUpdate) SetNillableIsLocked(v *bool) *UserAuthUpdate {
-	if v != nil {
-		_u.SetIsLocked(*v)
-	}
-	return _u
-}
-
-// SetLockedReason sets the "locked_reason" field.
-func (_u *UserAuthUpdate) SetLockedReason(v string) *UserAuthUpdate {
-	_u.mutation.SetLockedReason(v)
-	return _u
-}
-
-// SetNillableLockedReason sets the "locked_reason" field if the given value is not nil.
-func (_u *UserAuthUpdate) SetNillableLockedReason(v *string) *UserAuthUpdate {
-	if v != nil {
-		_u.SetLockedReason(*v)
-	}
-	return _u
-}
-
-// ClearLockedReason clears the value of the "locked_reason" field.
-func (_u *UserAuthUpdate) ClearLockedReason() *UserAuthUpdate {
-	_u.mutation.ClearLockedReason()
-	return _u
-}
-
-// SetFailedLoginAttempts sets the "failed_login_attempts" field.
-func (_u *UserAuthUpdate) SetFailedLoginAttempts(v int) *UserAuthUpdate {
-	_u.mutation.ResetFailedLoginAttempts()
-	_u.mutation.SetFailedLoginAttempts(v)
-	return _u
-}
-
-// SetNillableFailedLoginAttempts sets the "failed_login_attempts" field if the given value is not nil.
-func (_u *UserAuthUpdate) SetNillableFailedLoginAttempts(v *int) *UserAuthUpdate {
-	if v != nil {
-		_u.SetFailedLoginAttempts(*v)
-	}
-	return _u
-}
-
-// AddFailedLoginAttempts adds value to the "failed_login_attempts" field.
-func (_u *UserAuthUpdate) AddFailedLoginAttempts(v int) *UserAuthUpdate {
-	_u.mutation.AddFailedLoginAttempts(v)
-	return _u
-}
-
-// SetLastFailedAttempt sets the "last_failed_attempt" field.
-func (_u *UserAuthUpdate) SetLastFailedAttempt(v time.Time) *UserAuthUpdate {
-	_u.mutation.SetLastFailedAttempt(v)
-	return _u
-}
-
-// SetNillableLastFailedAttempt sets the "last_failed_attempt" field if the given value is not nil.
-func (_u *UserAuthUpdate) SetNillableLastFailedAttempt(v *time.Time) *UserAuthUpdate {
-	if v != nil {
-		_u.SetLastFailedAttempt(*v)
-	}
-	return _u
-}
-
-// ClearLastFailedAttempt clears the value of the "last_failed_attempt" field.
-func (_u *UserAuthUpdate) ClearLastFailedAttempt() *UserAuthUpdate {
-	_u.mutation.ClearLastFailedAttempt()
-	return _u
-}
-
 // SetPasswordChangedAt sets the "password_changed_at" field.
 func (_u *UserAuthUpdate) SetPasswordChangedAt(v time.Time) *UserAuthUpdate {
 	_u.mutation.SetPasswordChangedAt(v)
@@ -222,16 +147,6 @@ func (_u *UserAuthUpdate) check() error {
 			return &ValidationError{Name: "hash", err: fmt.Errorf(`client: validator failed for field "UserAuth.hash": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.LockedReason(); ok {
-		if err := userauth.LockedReasonValidator(v); err != nil {
-			return &ValidationError{Name: "locked_reason", err: fmt.Errorf(`client: validator failed for field "UserAuth.locked_reason": %w`, err)}
-		}
-	}
-	if v, ok := _u.mutation.FailedLoginAttempts(); ok {
-		if err := userauth.FailedLoginAttemptsValidator(v); err != nil {
-			return &ValidationError{Name: "failed_login_attempts", err: fmt.Errorf(`client: validator failed for field "UserAuth.failed_login_attempts": %w`, err)}
-		}
-	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`client: clearing a required unique edge "UserAuth.user"`)
 	}
@@ -252,27 +167,6 @@ func (_u *UserAuthUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Hash(); ok {
 		_spec.SetField(userauth.FieldHash, field.TypeString, value)
-	}
-	if value, ok := _u.mutation.IsLocked(); ok {
-		_spec.SetField(userauth.FieldIsLocked, field.TypeBool, value)
-	}
-	if value, ok := _u.mutation.LockedReason(); ok {
-		_spec.SetField(userauth.FieldLockedReason, field.TypeString, value)
-	}
-	if _u.mutation.LockedReasonCleared() {
-		_spec.ClearField(userauth.FieldLockedReason, field.TypeString)
-	}
-	if value, ok := _u.mutation.FailedLoginAttempts(); ok {
-		_spec.SetField(userauth.FieldFailedLoginAttempts, field.TypeInt, value)
-	}
-	if value, ok := _u.mutation.AddedFailedLoginAttempts(); ok {
-		_spec.AddField(userauth.FieldFailedLoginAttempts, field.TypeInt, value)
-	}
-	if value, ok := _u.mutation.LastFailedAttempt(); ok {
-		_spec.SetField(userauth.FieldLastFailedAttempt, field.TypeTime, value)
-	}
-	if _u.mutation.LastFailedAttemptCleared() {
-		_spec.ClearField(userauth.FieldLastFailedAttempt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.PasswordChangedAt(); ok {
 		_spec.SetField(userauth.FieldPasswordChangedAt, field.TypeTime, value)
@@ -357,81 +251,6 @@ func (_u *UserAuthUpdateOne) SetNillableHash(v *string) *UserAuthUpdateOne {
 	if v != nil {
 		_u.SetHash(*v)
 	}
-	return _u
-}
-
-// SetIsLocked sets the "is_locked" field.
-func (_u *UserAuthUpdateOne) SetIsLocked(v bool) *UserAuthUpdateOne {
-	_u.mutation.SetIsLocked(v)
-	return _u
-}
-
-// SetNillableIsLocked sets the "is_locked" field if the given value is not nil.
-func (_u *UserAuthUpdateOne) SetNillableIsLocked(v *bool) *UserAuthUpdateOne {
-	if v != nil {
-		_u.SetIsLocked(*v)
-	}
-	return _u
-}
-
-// SetLockedReason sets the "locked_reason" field.
-func (_u *UserAuthUpdateOne) SetLockedReason(v string) *UserAuthUpdateOne {
-	_u.mutation.SetLockedReason(v)
-	return _u
-}
-
-// SetNillableLockedReason sets the "locked_reason" field if the given value is not nil.
-func (_u *UserAuthUpdateOne) SetNillableLockedReason(v *string) *UserAuthUpdateOne {
-	if v != nil {
-		_u.SetLockedReason(*v)
-	}
-	return _u
-}
-
-// ClearLockedReason clears the value of the "locked_reason" field.
-func (_u *UserAuthUpdateOne) ClearLockedReason() *UserAuthUpdateOne {
-	_u.mutation.ClearLockedReason()
-	return _u
-}
-
-// SetFailedLoginAttempts sets the "failed_login_attempts" field.
-func (_u *UserAuthUpdateOne) SetFailedLoginAttempts(v int) *UserAuthUpdateOne {
-	_u.mutation.ResetFailedLoginAttempts()
-	_u.mutation.SetFailedLoginAttempts(v)
-	return _u
-}
-
-// SetNillableFailedLoginAttempts sets the "failed_login_attempts" field if the given value is not nil.
-func (_u *UserAuthUpdateOne) SetNillableFailedLoginAttempts(v *int) *UserAuthUpdateOne {
-	if v != nil {
-		_u.SetFailedLoginAttempts(*v)
-	}
-	return _u
-}
-
-// AddFailedLoginAttempts adds value to the "failed_login_attempts" field.
-func (_u *UserAuthUpdateOne) AddFailedLoginAttempts(v int) *UserAuthUpdateOne {
-	_u.mutation.AddFailedLoginAttempts(v)
-	return _u
-}
-
-// SetLastFailedAttempt sets the "last_failed_attempt" field.
-func (_u *UserAuthUpdateOne) SetLastFailedAttempt(v time.Time) *UserAuthUpdateOne {
-	_u.mutation.SetLastFailedAttempt(v)
-	return _u
-}
-
-// SetNillableLastFailedAttempt sets the "last_failed_attempt" field if the given value is not nil.
-func (_u *UserAuthUpdateOne) SetNillableLastFailedAttempt(v *time.Time) *UserAuthUpdateOne {
-	if v != nil {
-		_u.SetLastFailedAttempt(*v)
-	}
-	return _u
-}
-
-// ClearLastFailedAttempt clears the value of the "last_failed_attempt" field.
-func (_u *UserAuthUpdateOne) ClearLastFailedAttempt() *UserAuthUpdateOne {
-	_u.mutation.ClearLastFailedAttempt()
 	return _u
 }
 
@@ -538,16 +357,6 @@ func (_u *UserAuthUpdateOne) check() error {
 			return &ValidationError{Name: "hash", err: fmt.Errorf(`client: validator failed for field "UserAuth.hash": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.LockedReason(); ok {
-		if err := userauth.LockedReasonValidator(v); err != nil {
-			return &ValidationError{Name: "locked_reason", err: fmt.Errorf(`client: validator failed for field "UserAuth.locked_reason": %w`, err)}
-		}
-	}
-	if v, ok := _u.mutation.FailedLoginAttempts(); ok {
-		if err := userauth.FailedLoginAttemptsValidator(v); err != nil {
-			return &ValidationError{Name: "failed_login_attempts", err: fmt.Errorf(`client: validator failed for field "UserAuth.failed_login_attempts": %w`, err)}
-		}
-	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`client: clearing a required unique edge "UserAuth.user"`)
 	}
@@ -585,27 +394,6 @@ func (_u *UserAuthUpdateOne) sqlSave(ctx context.Context) (_node *UserAuth, err 
 	}
 	if value, ok := _u.mutation.Hash(); ok {
 		_spec.SetField(userauth.FieldHash, field.TypeString, value)
-	}
-	if value, ok := _u.mutation.IsLocked(); ok {
-		_spec.SetField(userauth.FieldIsLocked, field.TypeBool, value)
-	}
-	if value, ok := _u.mutation.LockedReason(); ok {
-		_spec.SetField(userauth.FieldLockedReason, field.TypeString, value)
-	}
-	if _u.mutation.LockedReasonCleared() {
-		_spec.ClearField(userauth.FieldLockedReason, field.TypeString)
-	}
-	if value, ok := _u.mutation.FailedLoginAttempts(); ok {
-		_spec.SetField(userauth.FieldFailedLoginAttempts, field.TypeInt, value)
-	}
-	if value, ok := _u.mutation.AddedFailedLoginAttempts(); ok {
-		_spec.AddField(userauth.FieldFailedLoginAttempts, field.TypeInt, value)
-	}
-	if value, ok := _u.mutation.LastFailedAttempt(); ok {
-		_spec.SetField(userauth.FieldLastFailedAttempt, field.TypeTime, value)
-	}
-	if _u.mutation.LastFailedAttemptCleared() {
-		_spec.ClearField(userauth.FieldLastFailedAttempt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.PasswordChangedAt(); ok {
 		_spec.SetField(userauth.FieldPasswordChangedAt, field.TypeTime, value)

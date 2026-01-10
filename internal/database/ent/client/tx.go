@@ -12,6 +12,16 @@ import (
 // Tx is a transactional client that is created by calling Client.Tx().
 type Tx struct {
 	config
+	// AuthLog is the client for interacting with the AuthLog builders.
+	AuthLog *AuthLogClient
+	// Contact is the client for interacting with the Contact builders.
+	Contact *ContactClient
+	// Property is the client for interacting with the Property builders.
+	Property *PropertyClient
+	// PropertyImage is the client for interacting with the PropertyImage builders.
+	PropertyImage *PropertyImageClient
+	// RateLimit is the client for interacting with the RateLimit builders.
+	RateLimit *RateLimitClient
 	// Session is the client for interacting with the Session builders.
 	Session *SessionClient
 	// User is the client for interacting with the User builders.
@@ -149,6 +159,11 @@ func (tx *Tx) Client() *Client {
 }
 
 func (tx *Tx) init() {
+	tx.AuthLog = NewAuthLogClient(tx.config)
+	tx.Contact = NewContactClient(tx.config)
+	tx.Property = NewPropertyClient(tx.config)
+	tx.PropertyImage = NewPropertyImageClient(tx.config)
+	tx.RateLimit = NewRateLimitClient(tx.config)
 	tx.Session = NewSessionClient(tx.config)
 	tx.User = NewUserClient(tx.config)
 	tx.UserAuth = NewUserAuthClient(tx.config)
@@ -161,7 +176,7 @@ func (tx *Tx) init() {
 // of them in order to commit or rollback the transaction.
 //
 // If a closed transaction is embedded in one of the generated entities, and the entity
-// applies a query, for example: Session.QueryXXX(), the query will be executed
+// applies a query, for example: AuthLog.QueryXXX(), the query will be executed
 // through the driver which created this transaction.
 //
 // Note that txDriver is not goroutine safe.

@@ -6,6 +6,21 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
+// AuthLog is the predicate function for authlog builders.
+type AuthLog func(*sql.Selector)
+
+// Contact is the predicate function for contact builders.
+type Contact func(*sql.Selector)
+
+// Property is the predicate function for property builders.
+type Property func(*sql.Selector)
+
+// PropertyImage is the predicate function for propertyimage builders.
+type PropertyImage func(*sql.Selector)
+
+// RateLimit is the predicate function for ratelimit builders.
+type RateLimit func(*sql.Selector)
+
 // Session is the predicate function for session builders.
 type Session func(*sql.Selector)
 

@@ -8,6 +8,243 @@ import (
 )
 
 var (
+	// AuthLogsColumns holds the columns for the "auth_logs" table.
+	AuthLogsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "email", Type: field.TypeString, Size: 255},
+		{Name: "event_type", Type: field.TypeString, Size: 50},
+		{Name: "ip_address", Type: field.TypeString, Nullable: true, Size: 45},
+		{Name: "user_agent", Type: field.TypeString, Nullable: true, Size: 500},
+		{Name: "failure_reason", Type: field.TypeString, Nullable: true, Size: 500},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "user_id", Type: field.TypeInt, Nullable: true},
+	}
+	// AuthLogsTable holds the schema information for the "auth_logs" table.
+	AuthLogsTable = &schema.Table{
+		Name:       "auth_logs",
+		Columns:    AuthLogsColumns,
+		PrimaryKey: []*schema.Column{AuthLogsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "auth_logs_users_auth_logs",
+				Columns:    []*schema.Column{AuthLogsColumns[7]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "authlog_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AuthLogsColumns[7], AuthLogsColumns[6]},
+			},
+			{
+				Name:    "authlog_email_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AuthLogsColumns[1], AuthLogsColumns[6]},
+			},
+			{
+				Name:    "authlog_event_type_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AuthLogsColumns[2], AuthLogsColumns[6]},
+			},
+			{
+				Name:    "authlog_ip_address_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AuthLogsColumns[3], AuthLogsColumns[6]},
+			},
+		},
+	}
+	// ContactsColumns holds the columns for the "contacts" table.
+	ContactsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "name", Type: field.TypeString, Size: 150},
+		{Name: "email", Type: field.TypeString, Size: 255},
+		{Name: "phone", Type: field.TypeString, Size: 20},
+		{Name: "notes", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "user_id", Type: field.TypeInt},
+	}
+	// ContactsTable holds the schema information for the "contacts" table.
+	ContactsTable = &schema.Table{
+		Name:       "contacts",
+		Columns:    ContactsColumns,
+		PrimaryKey: []*schema.Column{ContactsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "contacts_users_contacts",
+				Columns:    []*schema.Column{ContactsColumns[7]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "contact_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{ContactsColumns[7]},
+			},
+			{
+				Name:    "contact_user_id_email",
+				Unique:  false,
+				Columns: []*schema.Column{ContactsColumns[7], ContactsColumns[2]},
+			},
+		},
+	}
+	// PropertiesColumns holds the columns for the "properties" table.
+	PropertiesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "title", Type: field.TypeString, Size: 200},
+		{Name: "description", Type: field.TypeString, Size: 2147483647},
+		{Name: "property_type", Type: field.TypeEnum, Enums: []string{"house", "apartment", "villa", "townhouse", "land", "commercial"}, Default: "house"},
+		{Name: "price", Type: field.TypeFloat64},
+		{Name: "status", Type: field.TypeEnum, Enums: []string{"available", "pending", "sold", "rented"}, Default: "available"},
+		{Name: "is_published", Type: field.TypeBool, Default: false},
+		{Name: "address", Type: field.TypeString, Size: 255},
+		{Name: "district", Type: field.TypeString, Size: 100},
+		{Name: "municipality", Type: field.TypeString, Size: 100},
+		{Name: "parish", Type: field.TypeString, Nullable: true, Size: 100},
+		{Name: "postal_code", Type: field.TypeString, Nullable: true, Size: 20},
+		{Name: "country", Type: field.TypeString, Size: 2, Default: "PT"},
+		{Name: "latitude", Type: field.TypeFloat64, Nullable: true},
+		{Name: "longitude", Type: field.TypeFloat64, Nullable: true},
+		{Name: "bedrooms", Type: field.TypeInt, Nullable: true},
+		{Name: "bathrooms", Type: field.TypeInt, Nullable: true},
+		{Name: "area_sqm", Type: field.TypeFloat64, Nullable: true},
+		{Name: "land_area_sqm", Type: field.TypeFloat64, Nullable: true},
+		{Name: "year_built", Type: field.TypeInt, Nullable: true},
+		{Name: "floor", Type: field.TypeInt, Nullable: true},
+		{Name: "total_floors", Type: field.TypeInt, Nullable: true},
+		{Name: "parking_spaces", Type: field.TypeInt, Nullable: true},
+		{Name: "has_garage", Type: field.TypeBool, Default: false},
+		{Name: "has_garden", Type: field.TypeBool, Default: false},
+		{Name: "has_pool", Type: field.TypeBool, Default: false},
+		{Name: "has_elevator", Type: field.TypeBool, Default: false},
+		{Name: "energy_rating", Type: field.TypeEnum, Nullable: true, Enums: []string{"Aplus", "A", "B", "C", "D", "E", "F", "G"}},
+		{Name: "virtual_tour_url", Type: field.TypeString, Nullable: true, Size: 500},
+		{Name: "view_count", Type: field.TypeInt, Default: 0},
+		{Name: "published_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "contact_id", Type: field.TypeInt},
+		{Name: "publisher_id", Type: field.TypeInt},
+	}
+	// PropertiesTable holds the schema information for the "properties" table.
+	PropertiesTable = &schema.Table{
+		Name:       "properties",
+		Columns:    PropertiesColumns,
+		PrimaryKey: []*schema.Column{PropertiesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "properties_contacts_properties",
+				Columns:    []*schema.Column{PropertiesColumns[33]},
+				RefColumns: []*schema.Column{ContactsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "properties_users_properties",
+				Columns:    []*schema.Column{PropertiesColumns[34]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "property_publisher_id",
+				Unique:  false,
+				Columns: []*schema.Column{PropertiesColumns[34]},
+			},
+			{
+				Name:    "property_district_status_is_published",
+				Unique:  false,
+				Columns: []*schema.Column{PropertiesColumns[8], PropertiesColumns[5], PropertiesColumns[6]},
+			},
+			{
+				Name:    "property_municipality_status_is_published",
+				Unique:  false,
+				Columns: []*schema.Column{PropertiesColumns[9], PropertiesColumns[5], PropertiesColumns[6]},
+			},
+			{
+				Name:    "property_price_status_is_published",
+				Unique:  false,
+				Columns: []*schema.Column{PropertiesColumns[4], PropertiesColumns[5], PropertiesColumns[6]},
+			},
+			{
+				Name:    "property_property_type_status_is_published",
+				Unique:  false,
+				Columns: []*schema.Column{PropertiesColumns[3], PropertiesColumns[5], PropertiesColumns[6]},
+			},
+		},
+	}
+	// PropertyImagesColumns holds the columns for the "property_images" table.
+	PropertyImagesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "image_data", Type: field.TypeBytes},
+		{Name: "content_type", Type: field.TypeString, Size: 50},
+		{Name: "file_size", Type: field.TypeInt},
+		{Name: "width", Type: field.TypeInt},
+		{Name: "height", Type: field.TypeInt},
+		{Name: "display_order", Type: field.TypeInt, Default: 0},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "property_id", Type: field.TypeInt},
+	}
+	// PropertyImagesTable holds the schema information for the "property_images" table.
+	PropertyImagesTable = &schema.Table{
+		Name:       "property_images",
+		Columns:    PropertyImagesColumns,
+		PrimaryKey: []*schema.Column{PropertyImagesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "property_images_properties_images",
+				Columns:    []*schema.Column{PropertyImagesColumns[8]},
+				RefColumns: []*schema.Column{PropertiesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "propertyimage_property_id_display_order",
+				Unique:  false,
+				Columns: []*schema.Column{PropertyImagesColumns[8], PropertyImagesColumns[6]},
+			},
+		},
+	}
+	// RateLimitsColumns holds the columns for the "rate_limits" table.
+	RateLimitsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "email", Type: field.TypeString, Size: 255},
+		{Name: "ip_address", Type: field.TypeString, Size: 45},
+		{Name: "action", Type: field.TypeString, Size: 50},
+		{Name: "attempt_count", Type: field.TypeInt, Default: 1},
+		{Name: "window_start", Type: field.TypeTime},
+		{Name: "blocked_until", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// RateLimitsTable holds the schema information for the "rate_limits" table.
+	RateLimitsTable = &schema.Table{
+		Name:       "rate_limits",
+		Columns:    RateLimitsColumns,
+		PrimaryKey: []*schema.Column{RateLimitsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "ratelimit_email_ip_address_action",
+				Unique:  true,
+				Columns: []*schema.Column{RateLimitsColumns[1], RateLimitsColumns[2], RateLimitsColumns[3]},
+			},
+			{
+				Name:    "ratelimit_window_start",
+				Unique:  false,
+				Columns: []*schema.Column{RateLimitsColumns[5]},
+			},
+			{
+				Name:    "ratelimit_blocked_until",
+				Unique:  false,
+				Columns: []*schema.Column{RateLimitsColumns[6]},
+			},
+		},
+	}
 	// SessionsColumns holds the columns for the "sessions" table.
 	SessionsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt, Increment: true},
@@ -56,6 +293,7 @@ var (
 		{Name: "last_name", Type: field.TypeString, Size: 100},
 		{Name: "email", Type: field.TypeString, Unique: true, Size: 255},
 		{Name: "is_active", Type: field.TypeBool, Default: true},
+		{Name: "is_super_user", Type: field.TypeBool, Default: false},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
 	}
@@ -76,10 +314,6 @@ var (
 	UserAuthsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt, Increment: true},
 		{Name: "hash", Type: field.TypeString},
-		{Name: "is_locked", Type: field.TypeBool, Default: false},
-		{Name: "locked_reason", Type: field.TypeString, Nullable: true, Size: 500},
-		{Name: "failed_login_attempts", Type: field.TypeInt, Default: 0},
-		{Name: "last_failed_attempt", Type: field.TypeTime, Nullable: true},
 		{Name: "password_changed_at", Type: field.TypeTime, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
@@ -93,7 +327,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "user_auths_users_auth",
-				Columns:    []*schema.Column{UserAuthsColumns[9]},
+				Columns:    []*schema.Column{UserAuthsColumns[5]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -102,12 +336,17 @@ var (
 			{
 				Name:    "userauth_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{UserAuthsColumns[9]},
+				Columns: []*schema.Column{UserAuthsColumns[5]},
 			},
 		},
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
+		AuthLogsTable,
+		ContactsTable,
+		PropertiesTable,
+		PropertyImagesTable,
+		RateLimitsTable,
 		SessionsTable,
 		UsersTable,
 		UserAuthsTable,
@@ -115,6 +354,11 @@ var (
 )
 
 func init() {
+	AuthLogsTable.ForeignKeys[0].RefTable = UsersTable
+	ContactsTable.ForeignKeys[0].RefTable = UsersTable
+	PropertiesTable.ForeignKeys[0].RefTable = ContactsTable
+	PropertiesTable.ForeignKeys[1].RefTable = UsersTable
+	PropertyImagesTable.ForeignKeys[0].RefTable = PropertiesTable
 	SessionsTable.ForeignKeys[0].RefTable = UsersTable
 	UserAuthsTable.ForeignKeys[0].RefTable = UsersTable
 }

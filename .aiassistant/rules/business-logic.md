@@ -1,0 +1,1854 @@
+---
+apply: always
+---
+
+# ImmoLux Property Management - Business Logic Documentation
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Database Schema](#database-schema)
+3. [Property Structure](#property-structure)
+4. [Location Validation System](#location-validation-system)
+5. [Contact Management](#contact-management)
+6. [Image Management](#image-management)
+7. [API Endpoints](#api-endpoints)
+8. [Frontend Integration Guide](#frontend-integration-guide)
+9. [Validation Rules](#validation-rules)
+10. [Error Handling](#error-handling)
+
+---
+
+## Overview
+
+The ImmoLux property management system enables authenticated users to create, manage, and publish real estate listings
+in Portugal. The system implements:
+
+- **3-Level Portuguese Location Structure**: District (Distrito), Municipality (Concelho), Parish (Freguesia)
+- **Contact Management**: Reusable contact persons linked to properties
+- **Image Management**: Binary storage with automatic processing (resize, compression)
+- **Publishing Control**: Draft vs published states for properties
+- **Location Validation**: Real-time validation against official Portuguese administrative divisions
+
+### Key Features
+
+- Properties can be in draft or published state
+- Each property belongs to a publisher (authenticated user)
+- Properties linked to reusable contact persons
+- Multiple images per property with display order
+- Comprehensive filtering by location, type, price, status
+- Automatic image optimization (max 1920px, 85% JPEG quality)
+
+---
+
+## Database Schema
+
+### Entity Relationship Overview
+
+```
+User (Publisher)
+  ├── Contact (1:Many) - Contact persons created by user
+  ├── Property (1:Many) - Properties published by user
+  └── Session (1:Many) - User authentication sessions
+
+Property
+  ├── Contact (Many:1) - Contact person for this property
+  ├── User/Publisher (Many:1) - User who published
+  └── PropertyImage (1:Many) - Images for this property
+```
+
+### Property Table
+
+**File**: `internal/database/ent/schema/property.go`
+
+**Fields**:
+
+| Field            | Type      | Required | Description                                          |
+|------------------|-----------|----------|------------------------------------------------------|
+| id               | int       | Auto     | Primary key                                          |
+| title            | string    | Yes      | Property title (max 200 chars)                       |
+| description      | text      | Yes      | Full description                                     |
+| property_type    | enum      | Yes      | house, apartment, villa, townhouse, land, commercial |
+| price            | float     | Yes      | Price in EUR (must be positive)                      |
+| status           | enum      | Yes      | available, pending, sold, rented                     |
+| is_published     | bool      | No       | Default: false. Controls public visibility           |
+| address          | string    | Yes      | Street address (max 255 chars)                       |
+| district         | string    | Yes      | Portuguese distrito (max 100 chars)                  |
+| municipality     | string    | Yes      | Portuguese concelho (max 100 chars)                  |
+| parish           | string    | No       | Portuguese freguesia (max 100 chars, optional)       |
+| postal_code      | string    | No       | Format: XXXX-XXX (e.g., 1000-001)                    |
+| country          | string    | No       | Default: "PT" (ISO 3166-1 alpha-2)                   |
+| latitude         | float     | No       | GPS latitude                                         |
+| longitude        | float     | No       | GPS longitude                                        |
+| bedrooms         | int       | No       | Number of bedrooms (≥ 0)                             |
+| bathrooms        | int       | No       | Number of bathrooms (≥ 0)                            |
+| area_sqm         | float     | No       | Area in square meters (> 0)                          |
+| land_area_sqm    | float     | No       | Land area in square meters (> 0)                     |
+| year_built       | int       | No       | Year property was built                              |
+| floor            | int       | No       | Floor number (for apartments)                        |
+| total_floors     | int       | No       | Total floors in building                             |
+| parking_spaces   | int       | No       | Number of parking spaces (≥ 0)                       |
+| has_garage       | bool      | No       | Default: false                                       |
+| has_garden       | bool      | No       | Default: false                                       |
+| has_pool         | bool      | No       | Default: false                                       |
+| has_elevator     | bool      | No       | Default: false                                       |
+| energy_rating    | enum      | No       | Aplus, A, B, C, D, E, F, G                           |
+| virtual_tour_url | string    | No       | URL to virtual tour (max 500 chars)                  |
+| contact_id       | int       | Yes      | Foreign key to Contact                               |
+| publisher_id     | int       | Yes      | Foreign key to User                                  |
+| view_count       | int       | Auto     | Default: 0 (auto-incremented on view)                |
+| published_at     | timestamp | No       | When property was published                          |
+| created_at       | timestamp | Auto     | Creation timestamp                                   |
+| updated_at       | timestamp | Auto     | Last update timestamp                                |
+
+**Indexes**:
+
+- `publisher_id` - For user's properties queries
+- `district, status, is_published` - For location filtering
+- `municipality, status, is_published` - For municipality filtering
+- `price, status, is_published` - For price range queries
+- `property_type, status, is_published` - For type filtering
+
+**Enums**:
+
+```go
+// PropertyType
+type PropertyType string
+const (
+PropertyTypeHouse      PropertyType = "house"
+PropertyTypeApartment  PropertyType = "apartment"
+PropertyTypeVilla      PropertyType = "villa"
+PropertyTypeTownhouse  PropertyType = "townhouse"
+PropertyTypeLand       PropertyType = "land"
+PropertyTypeCommercial PropertyType = "commercial"
+)
+
+// Status
+type Status string
+const (
+StatusAvailable Status = "available"
+StatusPending   Status = "pending"
+StatusSold      Status = "sold"
+StatusRented    Status = "rented"
+)
+
+// EnergyRating (Note: A+ is "Aplus" in database)
+type EnergyRating string
+const (
+EnergyRatingAplus EnergyRating = "Aplus" // A+
+EnergyRatingA     EnergyRating = "A"
+EnergyRatingB     EnergyRating = "B"
+EnergyRatingC     EnergyRating = "C"
+EnergyRatingD     EnergyRating = "D"
+EnergyRatingE     EnergyRating = "E"
+EnergyRatingF     EnergyRating = "F"
+EnergyRatingG     EnergyRating = "G"
+)
+```
+
+### Contact Table
+
+**File**: `internal/database/ent/schema/contact.go`
+
+**Fields**:
+
+| Field      | Type      | Required | Description                   |
+|------------|-----------|----------|-------------------------------|
+| id         | int       | Auto     | Primary key                   |
+| user_id    | int       | Yes      | Foreign key to User (owner)   |
+| name       | string    | Yes      | Contact name (max 150 chars)  |
+| email      | string    | Yes      | Contact email (max 255 chars) |
+| phone      | string    | Yes      | Contact phone (max 20 chars)  |
+| notes      | text      | No       | Additional notes              |
+| created_at | timestamp | Auto     | Creation timestamp            |
+| updated_at | timestamp | Auto     | Last update timestamp         |
+
+**Indexes**:
+
+- `user_id` - For user's contacts queries
+- `email` - For duplicate checking
+
+**Relationships**:
+
+- Belongs to User (owner who created the contact)
+- Has many Properties (properties using this contact)
+
+### PropertyImage Table
+
+**File**: `internal/database/ent/schema/propertyimage.go`
+
+**Fields**:
+
+| Field         | Type      | Required | Description                         |
+|---------------|-----------|----------|-------------------------------------|
+| id            | int       | Auto     | Primary key                         |
+| property_id   | int       | Yes      | Foreign key to Property             |
+| image_data    | bytea     | Yes      | Binary image data (JPEG, processed) |
+| content_type  | string    | Yes      | MIME type (max 50 chars)            |
+| file_size     | int       | Yes      | Size in bytes (> 0)                 |
+| width         | int       | Yes      | Image width in pixels               |
+| height        | int       | Yes      | Image height in pixels              |
+| display_order | int       | No       | Default: 0. Lower = shown first     |
+| created_at    | timestamp | Auto     | Upload timestamp                    |
+
+**Indexes**:
+
+- `property_id, display_order` - For ordered image retrieval
+
+**Notes**:
+
+- Images are automatically processed before storage (see Image Management)
+- Maximum upload size: 10MB
+- Images resized to max 1920x1920px (maintains aspect ratio)
+- All images converted to JPEG at 85% quality
+- Binary storage in PostgreSQL (no filesystem dependencies)
+
+---
+
+## Property Structure
+
+### PropertyDTO (API Model)
+
+**File**: `internal/models/property.go`
+
+```go
+type PropertyDTO struct {
+ID             *RecordId  `json:"id"`
+Title          *string    `json:"title"`
+Description    *string    `json:"description"`
+PropertyType   *string    `json:"propertyType"`
+Price          *float64   `json:"price"`
+Status         *string    `json:"status"`
+IsPublished    *bool      `json:"isPublished"`
+
+// Location (3-level Portuguese structure)
+Address        *string    `json:"address"`
+District       *string    `json:"district"`     // Required
+Municipality   *string    `json:"municipality"` // Required
+Parish         *string    `json:"parish"` // Optional
+PostalCode     *string    `json:"postalCode"`
+Country        *string    `json:"country"`
+Latitude       *float64   `json:"latitude"`
+Longitude      *float64   `json:"longitude"`
+
+// Property details
+Bedrooms       *int       `json:"bedrooms"`
+Bathrooms      *int       `json:"bathrooms"`
+AreaSqm        *float64   `json:"areaSqm"`
+LandAreaSqm    *float64   `json:"landAreaSqm"`
+YearBuilt      *int       `json:"yearBuilt"`
+Floor          *int       `json:"floor"`
+TotalFloors    *int       `json:"totalFloors"`
+ParkingSpaces  *int       `json:"parkingSpaces"`
+
+// Features
+HasGarage      *bool      `json:"hasGarage"`
+HasGarden      *bool      `json:"hasGarden"`
+HasPool        *bool      `json:"hasPool"`
+HasElevator    *bool      `json:"hasElevator"`
+EnergyRating   *string    `json:"energyRating"`
+VirtualTourURL *string    `json:"virtualTourUrl"`
+
+// Relationships
+ContactID      *RecordId  `json:"contactId"`
+Contact        *ContactDTO `json:"contact,omitempty"` // Nested for convenience
+PublisherID    *RecordId  `json:"publisherId"`
+
+// Metadata
+ViewCount      *int       `json:"viewCount"`
+PublishedAt    *time.Time `json:"publishedAt"`
+CreatedAt      *time.Time `json:"createdAt"`
+UpdatedAt      *time.Time `json:"updatedAt"`
+}
+```
+
+**TypeScript Equivalent** (for frontend):
+
+```typescript
+interface PropertyDTO {
+    id?: number;
+    title?: string;
+    description?: string;
+    propertyType?: 'house' | 'apartment' | 'villa' | 'townhouse' | 'land' | 'commercial';
+    price?: number;
+    status?: 'available' | 'pending' | 'sold' | 'rented';
+    isPublished?: boolean;
+
+    // Location
+    address?: string;
+    district?: string;      // Required on create
+    municipality?: string;  // Required on create
+    parish?: string;        // Optional
+    postalCode?: string;
+    country?: string;
+    latitude?: number;
+    longitude?: number;
+
+    // Property details
+    bedrooms?: number;
+    bathrooms?: number;
+    areaSqm?: number;
+    landAreaSqm?: number;
+    yearBuilt?: number;
+    floor?: number;
+    totalFloors?: number;
+    parkingSpaces?: number;
+
+    // Features
+    hasGarage?: boolean;
+    hasGarden?: boolean;
+    hasPool?: boolean;
+    hasElevator?: boolean;
+    energyRating?: 'Aplus' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G';
+    virtualTourUrl?: string;
+
+    // Relationships
+    contactId?: number;
+    contact?: ContactDTO;
+    publisherId?: number;
+
+    // Metadata
+    viewCount?: number;
+    publishedAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
+}
+```
+
+---
+
+## Location Validation System
+
+### Overview
+
+The system validates property locations against official Portuguese administrative divisions data (18 districts, 308
+municipalities, 3000+ parishes).
+
+**Data Source**: `internal/utils/data/portugal-admin-divisions.json`
+
+- Embedded in binary using `//go:embed`
+- No external dependencies at runtime
+- Fast O(1) hash map lookups
+
+### Portuguese Administrative Levels
+
+1. **Distrito (District)** - 18 total
+    - Top-level administrative division
+    - Examples: Lisboa, Porto, Faro, Braga
+    - **Required** for all properties
+
+2. **Concelho (Municipality)** - 308 total
+    - Second-level division within districts
+    - Examples: Sintra, Cascais, Oeiras, Vila Nova de Gaia
+    - **Required** for all properties
+
+3. **Freguesia (Parish)** - 3000+ total
+    - Third-level division within municipalities
+    - Examples: Queluz, São Domingos de Rana, Agualva-Cacém
+    - **Optional** for properties
+
+### Validation Implementation
+
+**File**: `internal/utils/location_validator.go`
+
+**Key Functions**:
+
+```go
+// Get singleton validator instance
+validator, err := utils.GetLocationValidator()
+
+// Validation methods (case-insensitive)
+isValid := validator.ValidateDistrict("Lisboa") // true
+isValid := validator.ValidateMunicipality("Sintra") // true
+isValid := validator.ValidateParish("Queluz") // true
+isValid := validator.ValidatePostalCode("1000-001") // true (format only)
+
+// Get lists for dropdowns
+districts := validator.GetDistricts() // []string (18 items)
+municipalities := validator.GetMunicipalities() // []string (308 items)
+parishes := validator.GetParishes()             // []string (3000+ items)
+```
+
+### Validation Rules
+
+**Property Creation/Update**:
+
+1. **District** - Must be valid Portuguese district (case-insensitive)
+2. **Municipality** - Must be valid Portuguese municipality (case-insensitive)
+3. **Parish** - If provided, must be valid Portuguese parish (case-insensitive)
+4. **Postal Code** - If provided, must match format `XXXX-XXX` (e.g., `1000-001`)
+
+**Error Codes**:
+
+- `INVALID_DISTRICT` - District not found in database
+- `INVALID_MUNICIPALITY` - Municipality not found in database
+- `INVALID_PARISH` - Parish not found in database
+- `INVALID_POSTAL_CODE` - Wrong format (must be XXXX-XXX)
+
+**Implementation Location**: `internal/database/property_repository.go:validatePropertyInput()`
+
+---
+
+## Contact Management
+
+### Overview
+
+Contacts are reusable entities that can be linked to multiple properties. Each user can create their own contacts and
+reuse them across properties.
+
+### ContactDTO
+
+**File**: `internal/models/property.go`
+
+```go
+type ContactDTO struct {
+ID        *RecordId  `json:"id"`
+UserID    *RecordId  `json:"userId"`
+Name      *string    `json:"name"`
+Email     *string    `json:"email"`
+Phone     *string    `json:"phone"`
+Notes     *string    `json:"notes"`
+CreatedAt *time.Time `json:"createdAt"`
+UpdatedAt *time.Time `json:"updatedAt"`
+}
+```
+
+**TypeScript Equivalent**:
+
+```typescript
+interface ContactDTO {
+    id?: number;
+    userId?: number;
+    name?: string;
+    email?: string;
+    phone?: string;
+    notes?: string;
+    createdAt?: string;
+    updatedAt?: string;
+}
+```
+
+### Contact Repository
+
+**File**: `internal/database/contact_repository.go`
+
+**Methods**:
+
+- `CreateContact(ctx, tx, contactDTO)` - Create new contact
+- `GetContactById(ctx, contactId)` - Get contact by ID
+- `GetContactsByUserId(ctx, userId)` - List user's contacts
+- `UpdateContact(ctx, tx, contactId, contactDTO)` - Update contact
+- `DeleteContact(ctx, tx, contactId)` - Delete contact
+- `FindByEmailAndUser(ctx, userId, email)` - Find contact by email
+
+**Ownership Validation**: All operations validate that the contact belongs to the requesting user.
+
+### Property-Contact Linking
+
+When creating a property, you can either:
+
+1. **Link to existing contact** (provide `id`):
+
+```json
+{
+  "title": "Beautiful Villa",
+  "contact": {
+    "id": 123
+  }
+}
+```
+
+2. **Create new contact** (provide contact details):
+
+```json
+{
+  "title": "Beautiful Villa",
+  "contact": {
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "+351 123456789",
+    "notes": "Available weekdays 9-5"
+  }
+}
+```
+
+**Transaction Safety**: Property creation with new contact is wrapped in a transaction. If property creation fails,
+contact is not created (automatic rollback).
+
+**Validation**: When linking existing contact, system validates:
+
+- Contact exists
+- Contact belongs to the requesting user
+- Error code: `CONTACT_ACCESS_DENIED` if not owner
+
+---
+
+## Image Management
+
+### Overview
+
+Property images are stored as binary data in PostgreSQL with automatic processing (resize, compression, format
+conversion).
+
+### Image Processing Pipeline
+
+**File**: `internal/utils/image.go`
+
+**Process**:
+
+1. **Upload** - Receive image file (max 10MB)
+2. **Content Type Detection** - Validate by magic bytes (not extension)
+3. **Decode** - Support JPEG and PNG
+4. **Resize** - If > 1920x1920, resize maintaining aspect ratio
+5. **Convert** - Convert to JPEG at 85% quality
+6. **Store** - Save binary data with metadata to database
+
+**Constants**:
+
+```go
+const (
+MaxImageWidth = 1920
+MaxImageHeight = 1920
+JpegQuality    = 85
+MaxImageSize = 10 * 1024 * 1024 // 10MB
+)
+```
+
+### PropertyImageDTO
+
+**File**: `internal/models/property.go`
+
+```go
+type PropertyImageDTO struct {
+ID           *RecordId  `json:"id"`
+PropertyID   *RecordId  `json:"propertyId"`
+ContentType  *string    `json:"contentType"`
+FileSize     *int       `json:"fileSize"`
+Width        *int       `json:"width"`
+Height       *int       `json:"height"`
+DisplayOrder *int       `json:"displayOrder"` // 0 = primary image
+CreatedAt    *time.Time `json:"createdAt"`
+}
+```
+
+**TypeScript Equivalent**:
+
+```typescript
+interface PropertyImageDTO {
+    id?: number;
+    propertyId?: number;
+    contentType?: string;
+    fileSize?: number;
+    width?: number;
+    height?: number;
+    displayOrder?: number;  // 0 = primary/first image
+    createdAt?: string;
+}
+```
+
+### Display Order
+
+Images are ordered by `display_order` field (ascending):
+
+- `0` = Primary image (shown first, used as thumbnail)
+- `1, 2, 3...` = Additional images
+
+**Auto-Assignment**: When uploading, if `display_order` not specified, system automatically assigns next available
+number.
+
+### Image Repository
+
+**File**: `internal/database/property_image_repository.go`
+
+**Methods**:
+
+- `CreateImage(ctx, tx, propertyId, imageData, contentType, width, height, fileSize, displayOrder)` - Upload image
+- `GetImageById(ctx, imageId)` - Get image binary data
+- `GetImagesByPropertyId(ctx, propertyId)` - List property images (ordered by display_order)
+- `UpdateImageOrder(ctx, tx, imageId, newOrder)` - Change display order
+- `DeleteImage(ctx, tx, imageId)` - Delete image
+- `DeleteImagesByPropertyId(ctx, tx, propertyId)` - Delete all property images (cascade)
+- `GetNextDisplayOrder(ctx, propertyId)` - Get next available display order
+
+---
+
+## API Endpoints
+
+### Location Endpoints (Public)
+
+#### GET /locations
+
+**Description**: Get all Portuguese administrative divisions in one request
+
+**Authentication**: None required (public)
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "districts": [
+      "Aveiro",
+      "Beja",
+      "Braga",
+      "...18 total"
+    ],
+    "municipalities": [
+      "Águeda",
+      "Albergaria-a-Velha",
+      "Anadia",
+      "...308 total"
+    ],
+    "parishes": [
+      "Aguada de Cima",
+      "Fermentelos",
+      "Macinhata do Vouga",
+      "...3000+ total"
+    ]
+  },
+  "error": null
+}
+```
+
+**Frontend Usage**:
+
+```typescript
+// Load once at app initialization or when user opens property form
+const response = await apiClient.get<LocationsResponse>('/locations');
+const {districts, municipalities, parishes} = response.data.data;
+
+// Populate dropdowns
+<select>
+    {#each districts as district}
+< option
+value = {district} > {district} < /option>
+{
+    /each}
+    < /select>
+```
+
+**Performance**: All data loaded at once (~300KB response), cache in frontend.
+
+---
+
+### Contact Endpoints (Secured)
+
+All contact endpoints require authentication (valid session cookie).
+
+#### POST /contacts
+
+**Description**: Create new contact
+
+**Authentication**: Required
+
+**Request**:
+
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "+351 123456789",
+  "notes": "Available weekdays 9-5"
+}
+```
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 123,
+    "userId": 1,
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "+351 123456789",
+    "notes": "Available weekdays 9-5",
+    "createdAt": "2025-01-10T12:00:00Z",
+    "updatedAt": "2025-01-10T12:00:00Z"
+  },
+  "error": null
+}
+```
+
+**Validation**:
+
+- `name` - Required, max 150 chars
+- `email` - Required, max 255 chars
+- `phone` - Required, max 20 chars
+- `notes` - Optional
+
+#### GET /contacts
+
+**Description**: List all contacts for authenticated user
+
+**Authentication**: Required
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 123,
+      "userId": 1,
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "+351 123456789",
+      "notes": "Available weekdays 9-5",
+      "createdAt": "2025-01-10T12:00:00Z",
+      "updatedAt": "2025-01-10T12:00:00Z"
+    }
+  ],
+  "error": null
+}
+```
+
+#### GET /contacts/:id
+
+**Description**: Get specific contact
+
+**Authentication**: Required
+
+**Response**: Same as single contact object
+
+**Errors**:
+
+- `CONTACT_NOT_FOUND` - Contact doesn't exist
+- `CONTACT_ACCESS_DENIED` - Contact belongs to another user
+
+#### PUT /contacts/:id
+
+**Description**: Update contact
+
+**Authentication**: Required
+
+**Request**: Partial update (provide only fields to change)
+
+```json
+{
+  "name": "John Smith",
+  "phone": "+351 987654321"
+}
+```
+
+**Response**: Updated contact object
+
+**Errors**:
+
+- `CONTACT_NOT_FOUND` - Contact doesn't exist
+- `CONTACT_ACCESS_DENIED` - Contact belongs to another user
+
+#### DELETE /contacts/:id
+
+**Description**: Delete contact
+
+**Authentication**: Required
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": null,
+  "error": null
+}
+```
+
+**Errors**:
+
+- `CONTACT_NOT_FOUND` - Contact doesn't exist
+- `CONTACT_ACCESS_DENIED` - Contact belongs to another user
+
+**Note**: Cannot delete contact if still linked to properties (would cause foreign key violation).
+
+---
+
+### Property Endpoints
+
+#### Public Endpoints (No Authentication)
+
+##### GET /properties
+
+**Description**: List published properties with filtering
+
+**Authentication**: None required
+
+**Query Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| district | string | Filter by district |
+| municipality | string | Filter by municipality |
+| parish | string | Filter by parish |
+| propertyType | string | house, apartment, villa, townhouse, land, commercial |
+| status | string | available, pending, sold, rented |
+| minPrice | float | Minimum price (inclusive) |
+| maxPrice | float | Maximum price (inclusive) |
+| limit | int | Results per page (default: 20, max: 100) |
+| offset | int | Pagination offset (default: 0) |
+
+**Example Request**:
+
+```
+GET /properties?district=Lisboa&municipality=Sintra&minPrice=200000&maxPrice=500000&limit=20&offset=0
+```
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "properties": [
+      {
+        "id": 1,
+        "title": "Beautiful Villa in Sintra",
+        "description": "Spacious 4 bedroom villa...",
+        "propertyType": "villa",
+        "price": 450000,
+        "status": "available",
+        "isPublished": true,
+        "address": "Rua da Liberdade, 45",
+        "district": "Lisboa",
+        "municipality": "Sintra",
+        "parish": "Queluz",
+        "postalCode": "2745-001",
+        "country": "PT",
+        "bedrooms": 4,
+        "bathrooms": 3,
+        "areaSqm": 250,
+        "landAreaSqm": 500,
+        "hasGarage": true,
+        "hasGarden": true,
+        "hasPool": true,
+        "contact": {
+          "id": 123,
+          "name": "John Doe",
+          "email": "john@example.com",
+          "phone": "+351 123456789"
+        },
+        "publisherId": 1,
+        "viewCount": 45,
+        "publishedAt": "2025-01-01T10:00:00Z",
+        "createdAt": "2024-12-15T08:30:00Z",
+        "updatedAt": "2025-01-10T12:00:00Z"
+      }
+    ],
+    "total": 1
+  },
+  "error": null
+}
+```
+
+**Notes**:
+
+- Only returns `isPublished: true` properties
+- Contact information included for each property
+- Results ordered by `created_at DESC` (newest first)
+- Total count provided for pagination
+
+##### GET /properties/:id
+
+**Description**: Get single property details
+
+**Authentication**: None required
+
+**Response**: Single property object (same structure as list item)
+
+**Side Effect**: Increments `view_count` by 1 each time accessed
+
+**Errors**:
+
+- `PROPERTY_NOT_FOUND` - Property doesn't exist or not published
+
+##### GET /properties/:id/images
+
+**Description**: Get property image metadata (not binary data)
+
+**Authentication**: None required
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "propertyId": 1,
+      "contentType": "image/jpeg",
+      "fileSize": 245678,
+      "width": 1920,
+      "height": 1080,
+      "displayOrder": 0,
+      "createdAt": "2025-01-10T12:00:00Z"
+    },
+    {
+      "id": 2,
+      "propertyId": 1,
+      "contentType": "image/jpeg",
+      "fileSize": 198456,
+      "width": 1600,
+      "height": 1200,
+      "displayOrder": 1,
+      "createdAt": "2025-01-10T12:05:00Z"
+    }
+  ],
+  "error": null
+}
+```
+
+**Notes**:
+
+- Images sorted by `display_order` (ascending)
+- First image (displayOrder: 0) is primary/thumbnail
+- Does NOT return binary data (use GET /images/:id for that)
+
+##### GET /images/:id
+
+**Description**: Get image binary data
+
+**Authentication**: None required
+
+**Response**: Binary image data (JPEG format)
+
+**Headers**:
+
+```
+Content-Type: image/jpeg
+Cache-Control: public, max-age=31536000
+```
+
+**Usage**:
+
+```html
+<img src="/api/images/1" alt="Property"/>
+```
+
+**Errors**:
+
+- `IMAGE_NOT_FOUND` - Image doesn't exist
+
+#### Secured Endpoints (Authentication Required)
+
+##### GET /my-properties
+
+**Description**: List all properties for authenticated user (including drafts)
+
+**Authentication**: Required
+
+**Query Parameters**: Same as public list (but includes unpublished)
+
+**Response**: Same structure as public list
+
+**Notes**:
+
+- Returns ALL user properties (published AND unpublished)
+- Contact information included for each property
+- Only shows properties where `publisher_id` matches authenticated user
+
+##### POST /properties
+
+**Description**: Create new property
+
+**Authentication**: Required
+
+**Request**:
+
+```json
+{
+  "title": "Beautiful Villa in Sintra",
+  "description": "Spacious 4 bedroom villa with stunning views...",
+  "propertyType": "villa",
+  "price": 450000,
+  "status": "available",
+  "address": "Rua da Liberdade, 45",
+  "district": "Lisboa",
+  "municipality": "Sintra",
+  "parish": "Queluz",
+  "postalCode": "2745-001",
+  "country": "PT",
+  "latitude": 38.7500,
+  "longitude": -9.2500,
+  "bedrooms": 4,
+  "bathrooms": 3,
+  "areaSqm": 250.5,
+  "landAreaSqm": 500.0,
+  "yearBuilt": 2015,
+  "parkingSpaces": 2,
+  "hasGarage": true,
+  "hasGarden": true,
+  "hasPool": true,
+  "hasElevator": false,
+  "energyRating": "A",
+  "virtualTourUrl": "https://example.com/tour",
+  "contact": {
+    "id": 123
+  }
+}
+```
+
+**OR with new contact**:
+
+```json
+{
+  "title": "Beautiful Villa in Sintra",
+  "...": "...",
+  "contact": {
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "+351 123456789",
+    "notes": "Available weekdays"
+  }
+}
+```
+
+**Response**: Created property object with nested contact
+
+**Validation Rules**:
+
+- **Required**: title, description, propertyType, price, address, district, municipality, contact
+- **District**: Must be valid Portuguese district
+- **Municipality**: Must be valid Portuguese municipality
+- **Parish**: If provided, must be valid Portuguese parish
+- **Postal Code**: If provided, must match format XXXX-XXX
+- **Price**: Must be > 0
+- **Contact**: Either provide `id` (existing) or `name/email/phone` (new)
+
+**Default Values**:
+
+- `isPublished`: false (draft mode)
+- `country`: "PT"
+- `status`: "available"
+- `viewCount`: 0
+- Boolean flags: false
+
+**Transaction**: If creating new contact, both contact and property created in transaction (atomic operation).
+
+**Errors**:
+
+- `PROPERTY_VALIDATION` - Missing required field
+- `INVALID_DISTRICT` - Invalid district
+- `INVALID_MUNICIPALITY` - Invalid municipality
+- `INVALID_PARISH` - Invalid parish
+- `INVALID_POSTAL_CODE` - Wrong postal code format
+- `CONTACT_ACCESS_DENIED` - Trying to use another user's contact
+- `CONTACT_NOT_FOUND` - Contact ID doesn't exist
+
+##### PUT /properties/:id
+
+**Description**: Update property
+
+**Authentication**: Required
+
+**Request**: Partial update (provide only fields to change)
+
+```json
+{
+  "title": "Updated Title",
+  "price": 475000,
+  "bedrooms": 5
+}
+```
+
+**Response**: Updated property object
+
+**Validation**: Same as create
+
+**Ownership Check**: User must be the publisher
+
+**Errors**:
+
+- `PROPERTY_NOT_FOUND` - Property doesn't exist
+- `ACCESS_DENIED` - Property belongs to another user
+- Same validation errors as create
+
+##### DELETE /properties/:id
+
+**Description**: Delete property
+
+**Authentication**: Required
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": null,
+  "error": null
+}
+```
+
+**Side Effects**: All property images are also deleted (cascade)
+
+**Ownership Check**: User must be the publisher
+
+**Errors**:
+
+- `PROPERTY_NOT_FOUND` - Property doesn't exist
+- `ACCESS_DENIED` - Property belongs to another user
+
+##### POST /properties/:id/publish
+
+**Description**: Publish property (make visible to public)
+
+**Authentication**: Required
+
+**Response**: Updated property object with `isPublished: true`
+
+**Side Effect**: Sets `published_at` timestamp to current time
+
+**Ownership Check**: User must be the publisher
+
+**Errors**:
+
+- `PROPERTY_NOT_FOUND` - Property doesn't exist
+- `ACCESS_DENIED` - Property belongs to another user
+
+##### POST /properties/:id/unpublish
+
+**Description**: Unpublish property (hide from public, back to draft)
+
+**Authentication**: Required
+
+**Response**: Updated property object with `isPublished: false`
+
+**Ownership Check**: User must be the publisher
+
+**Errors**:
+
+- `PROPERTY_NOT_FOUND` - Property doesn't exist
+- `ACCESS_DENIED` - Property belongs to another user
+
+---
+
+### Image Endpoints
+
+#### Public Endpoints
+
+##### GET /properties/:id/images
+
+See above in property endpoints.
+
+##### GET /images/:id
+
+See above in property endpoints.
+
+#### Secured Endpoints
+
+##### POST /properties/:id/images
+
+**Description**: Upload image for property
+
+**Authentication**: Required
+
+**Request**: Multipart form data
+
+```
+Content-Type: multipart/form-data
+
+file: [image file]
+displayOrder: 0  // Optional, auto-assigned if not provided
+```
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "propertyId": 1,
+    "contentType": "image/jpeg",
+    "fileSize": 245678,
+    "width": 1920,
+    "height": 1080,
+    "displayOrder": 0,
+    "createdAt": "2025-01-10T12:00:00Z"
+  },
+  "error": null
+}
+```
+
+**Processing**:
+
+1. Validate file size (max 10MB)
+2. Validate content type (JPEG or PNG)
+3. Resize if > 1920x1920 (maintains aspect ratio)
+4. Convert to JPEG at 85% quality
+5. Store binary data in database
+
+**Ownership Check**: User must be the property publisher
+
+**Errors**:
+
+- `PROPERTY_NOT_FOUND` - Property doesn't exist
+- `ACCESS_DENIED` - Property belongs to another user
+- `IMAGE_TOO_LARGE` - File size > 10MB
+- `INVALID_IMAGE_FORMAT` - Not JPEG or PNG
+- `IMAGE_PROCESSING_ERROR` - Failed to process image
+
+##### PUT /images/:id/order
+
+**Description**: Change image display order
+
+**Authentication**: Required
+
+**Request**:
+
+```json
+{
+  "displayOrder": 2
+}
+```
+
+**Response**: Updated image metadata
+
+**Ownership Check**: User must be the property publisher (checked via property)
+
+**Errors**:
+
+- `IMAGE_NOT_FOUND` - Image doesn't exist
+- `ACCESS_DENIED` - Property belongs to another user
+
+##### DELETE /images/:id
+
+**Description**: Delete image
+
+**Authentication**: Required
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "data": null,
+  "error": null
+}
+```
+
+**Ownership Check**: User must be the property publisher
+
+**Errors**:
+
+- `IMAGE_NOT_FOUND` - Image doesn't exist
+- `ACCESS_DENIED` - Property belongs to another user
+
+---
+
+## Frontend Integration Guide
+
+### Property Creation Flow
+
+**Step 1: Load Location Data**
+
+```typescript
+// On page mount or modal open
+const loadLocations = async () => {
+    const response = await apiClient.get<LocationsResponse>('/locations');
+    if (response.data.success) {
+        districts = response.data.data.districts;
+        municipalities = response.data.data.municipalities;
+        parishes = response.data.data.parishes;
+    }
+};
+```
+
+**Step 2: Load User's Contacts**
+
+```typescript
+const loadContacts = async () => {
+    const response = await apiClient.get<ContactDTO[]>('/contacts');
+    if (response.data.success) {
+        contacts = response.data.data;
+    }
+};
+```
+
+**Step 3: Property Form**
+
+```svelte
+<script lang="ts">
+  let property = $state({
+    title: '',
+    description: '',
+    propertyType: 'house',
+    price: 0,
+    status: 'available',
+    address: '',
+    district: '',
+    municipality: '',
+    parish: '',
+    postalCode: '',
+    // ... other fields
+  });
+
+  let useExistingContact = $state(true);
+  let selectedContactId = $state<number | null>(null);
+  let newContact = $state({
+    name: '',
+    email: '',
+    phone: '',
+    notes: ''
+  });
+</script>
+
+<form onsubmit={handleSubmit}>
+  <!-- Basic Info -->
+  <input type="text" bind:value={property.title} required />
+  <textarea bind:value={property.description} required />
+  <select bind:value={property.propertyType} required>
+    <option value="house">House</option>
+    <option value="apartment">Apartment</option>
+    <option value="villa">Villa</option>
+    <option value="townhouse">Townhouse</option>
+    <option value="land">Land</option>
+    <option value="commercial">Commercial</option>
+  </select>
+  <input type="number" bind:value={property.price} required />
+
+  <!-- Location (Required) -->
+  <select bind:value={property.district} required>
+    <option value="">Select District...</option>
+    {#each districts as district}
+      <option value={district}>{district}</option>
+    {/each}
+  </select>
+
+  <select bind:value={property.municipality} required>
+    <option value="">Select Municipality...</option>
+    {#each municipalities as municipality}
+      <option value={municipality}>{municipality}</option>
+    {/each}
+  </select>
+
+  <select bind:value={property.parish}>
+    <option value="">Select Parish (optional)...</option>
+    {#each parishes as parish}
+      <option value={parish}>{parish}</option>
+    {/each}
+  </select>
+
+  <input
+    type="text"
+    bind:value={property.postalCode}
+    placeholder="1000-001"
+    pattern="\d{4}-\d{3}"
+  />
+
+  <!-- Contact Section -->
+  <div>
+    <label>
+      <input type="radio" bind:group={useExistingContact} value={true} />
+      Use Existing Contact
+    </label>
+    <label>
+      <input type="radio" bind:group={useExistingContact} value={false} />
+      Create New Contact
+    </label>
+  </div>
+
+  {#if useExistingContact}
+    <select bind:value={selectedContactId} required>
+      <option value="">Select Contact...</option>
+      {#each contacts as contact}
+        <option value={contact.id}>{contact.name} - {contact.email}</option>
+      {/each}
+    </select>
+  {:else}
+    <input type="text" bind:value={newContact.name} required />
+    <input type="email" bind:value={newContact.email} required />
+    <input type="tel" bind:value={newContact.phone} required />
+    <textarea bind:value={newContact.notes} />
+  {/if}
+
+  <!-- Optional Fields -->
+  <input type="number" bind:value={property.bedrooms} min="0" />
+  <input type="number" bind:value={property.bathrooms} min="0" />
+  <!-- ... more fields ... -->
+
+  <button type="submit">Create Property</button>
+</form>
+```
+
+**Step 4: Submit Property**
+
+```typescript
+const handleSubmit = async (e: Event) => {
+    e.preventDefault();
+
+    const payload = {
+        ...property,
+        contact: useExistingContact
+            ? {id: selectedContactId}
+            : newContact
+    };
+
+    const response = await apiClient.post<PropertyDTO>('/properties', payload);
+
+    if (response.data.success) {
+        // Property created, get ID
+        const propertyId = response.data.data.id;
+
+        // Now upload images if any
+        if (selectedImages.length > 0) {
+            await uploadImages(propertyId);
+        }
+
+        goto(`/properties/${propertyId}`);
+    } else {
+        // Handle errors
+        errorMessage = response.data.error?.message;
+
+        // Specific error handling
+        switch (response.data.error?.code) {
+            case 'INVALID_DISTRICT':
+                districtError = 'Please select a valid district';
+                break;
+            case 'INVALID_MUNICIPALITY':
+                municipalityError = 'Please select a valid municipality';
+                break;
+            case 'INVALID_POSTAL_CODE':
+                postalCodeError = 'Format must be XXXX-XXX (e.g., 1000-001)';
+                break;
+        }
+    }
+};
+```
+
+**Step 5: Upload Images**
+
+```typescript
+const uploadImages = async (propertyId: number) => {
+    for (let i = 0; i < selectedImages.length; i++) {
+        const formData = new FormData();
+        formData.append('file', selectedImages[i]);
+        formData.append('displayOrder', i.toString());
+
+        const response = await apiClient.post(
+            `/properties/${propertyId}/images`,
+            formData
+        );
+
+        if (!response.data.success) {
+            console.error('Failed to upload image', response.data.error);
+        }
+    }
+};
+```
+
+### Property Listing/Browsing
+
+```typescript
+// Filter state
+let filters = $state({
+    district: '',
+    municipality: '',
+    parish: '',
+    propertyType: '',
+    minPrice: null,
+    maxPrice: null,
+    limit: 20,
+    offset: 0
+});
+
+let properties = $state<PropertyDTO[]>([]);
+let total = $state(0);
+let loading = $state(false);
+
+// Load properties
+const loadProperties = async () => {
+    loading = true;
+
+    // Build query string
+    const params = new URLSearchParams();
+    if (filters.district) params.append('district', filters.district);
+    if (filters.municipality) params.append('municipality', filters.municipality);
+    if (filters.parish) params.append('parish', filters.parish);
+    if (filters.propertyType) params.append('propertyType', filters.propertyType);
+    if (filters.minPrice) params.append('minPrice', filters.minPrice.toString());
+    if (filters.maxPrice) params.append('maxPrice', filters.maxPrice.toString());
+    params.append('limit', filters.limit.toString());
+    params.append('offset', filters.offset.toString());
+
+    const response = await apiClient.get<{ properties: PropertyDTO[], total: number }>(
+        `/properties?${params.toString()}`
+    );
+
+    if (response.data.success) {
+        properties = response.data.data.properties;
+        total = response.data.data.total;
+    }
+
+    loading = false;
+};
+
+// Property card component
+<div class = "property-card" >
+<img
+    src = {`/api/images/${property.images[0]?.id}`
+}
+alt = {property.title}
+/>
+< h3 > {property.title} < /h3>
+< p > {property.price.toLocaleString('pt-PT')}
+€ < /p>
+< p > {property.district}, {property.municipality} < /p>
+< p > {property.bedrooms}
+beds • {
+    property.bathrooms
+}
+baths • {
+    property.areaSqm
+}
+m²</p>
+< p > Contact
+:
+{
+    property.contact?.name
+}
+-{property.contact?.phone} < /p>
+< /div>
+```
+
+### Error Handling
+
+```typescript
+const handlePropertyError = (error: ServerAPIError) => {
+    // Map backend error codes to user messages
+    const errorMessages: Record<string, string> = {
+        'PROPERTY_NOT_FOUND': 'Property not found',
+        'ACCESS_DENIED': 'You do not have permission to modify this property',
+        'INVALID_DISTRICT': 'Please select a valid district from the list',
+        'INVALID_MUNICIPALITY': 'Please select a valid municipality from the list',
+        'INVALID_PARISH': 'Please select a valid parish from the list',
+        'INVALID_POSTAL_CODE': 'Postal code must be in format XXXX-XXX',
+        'PROPERTY_VALIDATION': 'Please fill in all required fields',
+        'CONTACT_ACCESS_DENIED': 'You can only use your own contacts',
+        'IMAGE_TOO_LARGE': 'Image file size must be less than 10MB',
+        'INVALID_IMAGE_FORMAT': 'Only JPEG and PNG images are supported'
+    };
+
+    return errorMessages[error.code || ''] || error.message || 'An error occurred';
+};
+```
+
+---
+
+## Validation Rules
+
+### Property Validation
+
+**Required Fields**:
+
+- `title` - String, max 200 chars
+- `description` - Text, no max length
+- `propertyType` - Enum (house, apartment, villa, townhouse, land, commercial)
+- `price` - Float > 0
+- `address` - String, max 255 chars
+- `district` - String, max 100 chars, must be valid Portuguese district
+- `municipality` - String, max 100 chars, must be valid Portuguese municipality
+- `contactId` - Integer, must reference existing contact owned by user
+
+**Optional But Validated**:
+
+- `parish` - If provided, must be valid Portuguese parish
+- `postalCode` - If provided, must match regex `^\d{4}-\d{3}$`
+- `bedrooms` - If provided, must be ≥ 0
+- `bathrooms` - If provided, must be ≥ 0
+- `areaSqm` - If provided, must be > 0
+- `landAreaSqm` - If provided, must be > 0
+- `parkingSpaces` - If provided, must be ≥ 0
+
+**Enums**:
+
+```
+propertyType: house | apartment | villa | townhouse | land | commercial
+status: available | pending | sold | rented
+energyRating: Aplus | A | B | C | D | E | F | G
+```
+
+### Contact Validation
+
+**Required Fields**:
+
+- `name` - String, max 150 chars
+- `email` - String, max 255 chars
+- `phone` - String, max 20 chars
+
+**Optional**:
+
+- `notes` - Text, no max length
+
+### Image Validation
+
+**Upload**:
+
+- Max file size: 10MB
+- Accepted formats: JPEG, PNG (validated by magic bytes)
+- Content type detection (not by extension)
+
+**Processing**:
+
+- Max dimensions: 1920x1920 (resized if larger, maintains aspect ratio)
+- Output format: JPEG at 85% quality
+- Stored as binary BYTEA in PostgreSQL
+
+---
+
+## Error Handling
+
+### Error Response Format
+
+All errors follow this structure:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable error message"
+  }
+}
+```
+
+### Common Error Codes
+
+#### Property Errors
+
+- `PROPERTY_NOT_FOUND` - Property doesn't exist
+- `PROPERTY_VALIDATION` - Missing or invalid required field
+- `ACCESS_DENIED` - User doesn't own this property
+- `INVALID_DISTRICT` - District not in Portuguese administrative divisions
+- `INVALID_MUNICIPALITY` - Municipality not in Portuguese administrative divisions
+- `INVALID_PARISH` - Parish not in Portuguese administrative divisions
+- `INVALID_POSTAL_CODE` - Postal code format is wrong (must be XXXX-XXX)
+
+#### Contact Errors
+
+- `CONTACT_NOT_FOUND` - Contact doesn't exist
+- `CONTACT_ACCESS_DENIED` - User doesn't own this contact
+- `CONTACT_VALIDATION` - Missing or invalid required field
+
+#### Image Errors
+
+- `IMAGE_NOT_FOUND` - Image doesn't exist
+- `IMAGE_TOO_LARGE` - File size exceeds 10MB
+- `INVALID_IMAGE_FORMAT` - Not JPEG or PNG
+- `IMAGE_PROCESSING_ERROR` - Failed to process/resize image
+
+#### Authentication Errors
+
+- `UNAUTHORIZED` - No valid session cookie
+- `SESSION_EXPIRED` - Session token has expired
+- `FORBIDDEN` - Authenticated but not authorized for this action
+
+### Frontend Error Handling Pattern
+
+```typescript
+// Generic API call wrapper
+const apiCall = async <T>(
+    apiFunction: () => Promise<AxiosResponse<ServerAPIResponse<T>>>
+): Promise<T | null> => {
+    try {
+        const response = await apiFunction();
+
+        if (response.data.success) {
+            return response.data.data;
+        } else {
+            // Handle error
+            toastError(handlePropertyError(response.data.error!));
+            return null;
+        }
+    } catch (error) {
+        // Network or unexpected error
+        toastError('An unexpected error occurred. Please try again.');
+        console.error('API Error:', error);
+        return null;
+    }
+};
+
+// Usage
+const property = await apiCall(() =>
+    apiClient.get<PropertyDTO>(`/properties/${id}`)
+);
+
+if (property) {
+    // Success
+    displayProperty(property);
+}
+```
+
+---
+
+## File Reference
+
+### Key Files
+
+**Schemas** (`internal/database/ent/schema/`):
+
+- `property.go` - Property entity schema
+- `contact.go` - Contact entity schema
+- `propertyimage.go` - Image entity schema
+- `user.go` - User entity schema (updated with contacts edge)
+
+**Models** (`internal/models/`):
+
+- `property.go` - PropertyDTO, ContactDTO, PropertyImageDTO
+
+**Repositories** (`internal/database/`):
+
+- `property_repository.go` - Property CRUD and validation
+- `contact_repository.go` - Contact CRUD
+- `property_image_repository.go` - Image CRUD and processing
+
+**Routes** (`internal/server/routes/`):
+
+- `property_public.go` - Public property endpoints
+- `property_user.go` - Authenticated property endpoints
+- `image_public.go` - Public image endpoints
+- `image_user.go` - Authenticated image endpoints
+- `contact.go` - Contact CRUD endpoints
+- `location.go` - Location data endpoint
+
+**Utilities** (`internal/utils/`):
+
+- `location_validator.go` - Location validation logic
+- `image.go` - Image processing logic
+- `data/portugal-admin-divisions.json` - Location data (embedded)
+
+**Configuration** (`internal/server/`):
+
+- `routing.go` - Route registration
+
+---
+
+## Important Notes
+
+### Performance Considerations
+
+1. **Location Data**: All location data (~300KB) loaded in one request. Cache in frontend, don't reload on every
+   property form open.
+
+2. **Image Binary Data**: Images served with cache headers (`Cache-Control: public, max-age=31536000`). Browser will
+   cache after first load.
+
+3. **Pagination**: Use `limit` and `offset` for property lists. Default limit is 20, max is 100.
+
+4. **View Counter**: Incremented on every GET /properties/:id request. Consider debouncing in frontend to avoid
+   inflating counts.
+
+### Security Considerations
+
+1. **Ownership Validation**: All modification endpoints (PUT, DELETE, POST) validate that the authenticated user owns
+   the resource.
+
+2. **Published vs Draft**: Public endpoints only return `isPublished: true` properties. Authenticated endpoints return
+   all user properties.
+
+3. **Image Upload**: 10MB limit enforced. Content type validated by magic bytes (not file extension) to prevent
+   malicious uploads.
+
+4. **Contact Privacy**: Contacts are user-specific. Users cannot access or use other users' contacts.
+
+### Data Consistency
+
+1. **Transactions**: Property creation with new contact uses database transaction. If either fails, both are rolled
+   back.
+
+2. **Cascade Delete**: Deleting property automatically deletes all associated images.
+
+3. **Foreign Key Constraints**: Cannot delete contact if still linked to properties (database will reject).
+
+### Frontend Best Practices
+
+1. **Load locations once**: Cache districts/municipalities/parishes data, don't reload every time.
+
+2. **Validate before submit**: Use HTML5 validation and client-side checks before API call to improve UX.
+
+3. **Image preview**: Show image preview before upload. Compress large images client-side if possible.
+
+4. **Cascading dropdowns**: Consider filtering municipalities by selected district, parishes by selected municipality
+   for better UX.
+
+5. **Draft autosave**: Consider implementing autosave for property drafts to prevent data loss.
+
+6. **Error translation**: Map error codes to localized messages (support PT, EN, FR as per frontend i18n).
+
+---
+
+## Testing Checklist
+
+### Property Creation
+
+- [ ] Create property with existing contact
+- [ ] Create property with new contact
+- [ ] Validate required fields (title, description, price, address, district, municipality)
+- [ ] Validate location against Portuguese divisions
+- [ ] Validate postal code format
+- [ ] Test with optional fields (bedrooms, bathrooms, etc.)
+- [ ] Test with all property types
+- [ ] Verify ownership (user_id = publisher_id)
+
+### Property Management
+
+- [ ] List user's properties (including drafts)
+- [ ] Update property fields
+- [ ] Delete property (verify images also deleted)
+- [ ] Publish property (verify isPublished = true, publishedAt set)
+- [ ] Unpublish property (verify isPublished = false)
+- [ ] Verify non-owner cannot modify property
+
+### Contact Management
+
+- [ ] Create contact
+- [ ] List user contacts
+- [ ] Update contact
+- [ ] Delete contact (verify can't delete if linked to properties)
+- [ ] Verify non-owner cannot access contact
+- [ ] Link existing contact to property
+- [ ] Create new contact via property creation
+
+### Image Management
+
+- [ ] Upload image (JPEG, PNG)
+- [ ] Upload oversized image (> 10MB, should fail)
+- [ ] Upload large image (> 1920px, verify resized)
+- [ ] Verify display order
+- [ ] Reorder images
+- [ ] Delete image
+- [ ] Verify images deleted with property
+
+### Public Access
+
+- [ ] List published properties
+- [ ] Filter by district, municipality, parish
+- [ ] Filter by price range
+- [ ] Filter by property type
+- [ ] View property details (verify view counter increments)
+- [ ] View property images
+- [ ] Verify drafts not visible to public
+
+### Location System
+
+- [ ] Load all location data
+- [ ] Validate valid district (case-insensitive)
+- [ ] Validate invalid district (should fail)
+- [ ] Validate valid municipality
+- [ ] Validate invalid municipality (should fail)
+- [ ] Validate valid parish
+- [ ] Validate invalid parish (should fail)
+- [ ] Validate postal code format
+
+---
+
+**End of Documentation**
+
+For additional information, see:
+
+- Main project guidelines: `.aiassistant/rules/project-info.md`
+- Authentication flow: `auth-flow.md`
+- Frontend guidelines: `C:\Users\andre\Desktop\Development\immo-lux-front-end\.aiassistant\rules\project-info.md`

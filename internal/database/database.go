@@ -94,6 +94,26 @@ func (db *Database) NewSessionRepository() *SessionRepository {
 	return NewSessionRepository(db)
 }
 
+func (db *Database) NewPropertyRepository() *PropertyRepository {
+	return NewPropertyRepository(db)
+}
+
+func (db *Database) NewPropertyImageRepository() *PropertyImageRepository {
+	return NewPropertyImageRepository(db)
+}
+
+func (db *Database) NewContactRepository() *ContactRepository {
+	return NewContactRepository(db)
+}
+
+func (db *Database) NewAuthLogRepository() *AuthLogRepository {
+	return NewAuthLogRepository(db)
+}
+
+func (db *Database) NewRateLimitRepository() *RateLimitRepository {
+	return NewRateLimitRepository(db)
+}
+
 func (db *Database) WithTransaction(fn func(ctx context.Context, tx *client.Tx) error) error {
 	ctx := context.Background()
 	tx, err := db.client.Tx(ctx)

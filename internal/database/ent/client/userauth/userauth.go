@@ -18,14 +18,6 @@ const (
 	FieldUserID = "user_id"
 	// FieldHash holds the string denoting the hash field in the database.
 	FieldHash = "hash"
-	// FieldIsLocked holds the string denoting the is_locked field in the database.
-	FieldIsLocked = "is_locked"
-	// FieldLockedReason holds the string denoting the locked_reason field in the database.
-	FieldLockedReason = "locked_reason"
-	// FieldFailedLoginAttempts holds the string denoting the failed_login_attempts field in the database.
-	FieldFailedLoginAttempts = "failed_login_attempts"
-	// FieldLastFailedAttempt holds the string denoting the last_failed_attempt field in the database.
-	FieldLastFailedAttempt = "last_failed_attempt"
 	// FieldPasswordChangedAt holds the string denoting the password_changed_at field in the database.
 	FieldPasswordChangedAt = "password_changed_at"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
@@ -50,10 +42,6 @@ var Columns = []string{
 	FieldID,
 	FieldUserID,
 	FieldHash,
-	FieldIsLocked,
-	FieldLockedReason,
-	FieldFailedLoginAttempts,
-	FieldLastFailedAttempt,
 	FieldPasswordChangedAt,
 	FieldCreatedAt,
 	FieldUpdatedAt,
@@ -74,14 +62,6 @@ var (
 	UserIDValidator func(int) error
 	// HashValidator is a validator for the "hash" field. It is called by the builders before save.
 	HashValidator func(string) error
-	// DefaultIsLocked holds the default value on creation for the "is_locked" field.
-	DefaultIsLocked bool
-	// LockedReasonValidator is a validator for the "locked_reason" field. It is called by the builders before save.
-	LockedReasonValidator func(string) error
-	// DefaultFailedLoginAttempts holds the default value on creation for the "failed_login_attempts" field.
-	DefaultFailedLoginAttempts int
-	// FailedLoginAttemptsValidator is a validator for the "failed_login_attempts" field. It is called by the builders before save.
-	FailedLoginAttemptsValidator func(int) error
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 	// DefaultUpdatedAt holds the default value on creation for the "updated_at" field.
@@ -106,26 +86,6 @@ func ByUserID(opts ...sql.OrderTermOption) OrderOption {
 // ByHash orders the results by the hash field.
 func ByHash(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldHash, opts...).ToFunc()
-}
-
-// ByIsLocked orders the results by the is_locked field.
-func ByIsLocked(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldIsLocked, opts...).ToFunc()
-}
-
-// ByLockedReason orders the results by the locked_reason field.
-func ByLockedReason(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldLockedReason, opts...).ToFunc()
-}
-
-// ByFailedLoginAttempts orders the results by the failed_login_attempts field.
-func ByFailedLoginAttempts(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldFailedLoginAttempts, opts...).ToFunc()
-}
-
-// ByLastFailedAttempt orders the results by the last_failed_attempt field.
-func ByLastFailedAttempt(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldLastFailedAttempt, opts...).ToFunc()
 }
 
 // ByPasswordChangedAt orders the results by the password_changed_at field.

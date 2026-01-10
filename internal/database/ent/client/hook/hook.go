@@ -8,6 +8,66 @@ import (
 	"immo-lux/internal/database/ent/client"
 )
 
+// The AuthLogFunc type is an adapter to allow the use of ordinary
+// function as AuthLog mutator.
+type AuthLogFunc func(context.Context, *client.AuthLogMutation) (client.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AuthLogFunc) Mutate(ctx context.Context, m client.Mutation) (client.Value, error) {
+	if mv, ok := m.(*client.AuthLogMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *client.AuthLogMutation", m)
+}
+
+// The ContactFunc type is an adapter to allow the use of ordinary
+// function as Contact mutator.
+type ContactFunc func(context.Context, *client.ContactMutation) (client.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ContactFunc) Mutate(ctx context.Context, m client.Mutation) (client.Value, error) {
+	if mv, ok := m.(*client.ContactMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *client.ContactMutation", m)
+}
+
+// The PropertyFunc type is an adapter to allow the use of ordinary
+// function as Property mutator.
+type PropertyFunc func(context.Context, *client.PropertyMutation) (client.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PropertyFunc) Mutate(ctx context.Context, m client.Mutation) (client.Value, error) {
+	if mv, ok := m.(*client.PropertyMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *client.PropertyMutation", m)
+}
+
+// The PropertyImageFunc type is an adapter to allow the use of ordinary
+// function as PropertyImage mutator.
+type PropertyImageFunc func(context.Context, *client.PropertyImageMutation) (client.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PropertyImageFunc) Mutate(ctx context.Context, m client.Mutation) (client.Value, error) {
+	if mv, ok := m.(*client.PropertyImageMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *client.PropertyImageMutation", m)
+}
+
+// The RateLimitFunc type is an adapter to allow the use of ordinary
+// function as RateLimit mutator.
+type RateLimitFunc func(context.Context, *client.RateLimitMutation) (client.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f RateLimitFunc) Mutate(ctx context.Context, m client.Mutation) (client.Value, error) {
+	if mv, ok := m.(*client.RateLimitMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *client.RateLimitMutation", m)
+}
+
 // The SessionFunc type is an adapter to allow the use of ordinary
 // function as Session mutator.
 type SessionFunc func(context.Context, *client.SessionMutation) (client.Value, error)
