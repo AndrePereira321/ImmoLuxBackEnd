@@ -126,16 +126,13 @@ func DeletePropertyImage(ctx *RouteContext) error {
 		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
 	}
 
-	images, err := ctx.Db().NewPropertyImageRepository().GetImagesByPropertyId(context.Background(), models.RecordId(imageIdInt))
+	// Get the image to find its property ID
+	image, err := ctx.Db().NewPropertyImageRepository().GetImageMetadataById(context.Background(), imageId)
 	if err != nil {
-		return err
-	}
-
-	if len(images) == 0 {
 		return ctx.RespondError(fiber.StatusNotFound, "IMAGE_NOT_FOUND", "Image not found")
 	}
 
-	propertyId := *images[0].PropertyID
+	propertyId := *image.PropertyID
 	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
 	if err != nil {
 		return err
@@ -180,16 +177,13 @@ func UpdatePropertyImageOrder(ctx *RouteContext) error {
 		return err
 	}
 
-	images, err := ctx.Db().NewPropertyImageRepository().GetImagesByPropertyId(context.Background(), models.RecordId(imageIdInt))
+	// Get the image to find its property ID
+	image, err := ctx.Db().NewPropertyImageRepository().GetImageMetadataById(context.Background(), imageId)
 	if err != nil {
-		return err
-	}
-
-	if len(images) == 0 {
 		return ctx.RespondError(fiber.StatusNotFound, "IMAGE_NOT_FOUND", "Image not found")
 	}
 
-	propertyId := *images[0].PropertyID
+	propertyId := *image.PropertyID
 	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
 	if err != nil {
 		return err

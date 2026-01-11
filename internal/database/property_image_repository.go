@@ -67,6 +67,25 @@ func (rep *PropertyImageRepository) GetImageById(ctx context.Context, imageId mo
 	return img.ImageData, img.ContentType, nil
 }
 
+func (rep *PropertyImageRepository) GetImageMetadataById(ctx context.Context, imageId models.RecordId) (*models.PropertyImageDTO, error) {
+	if !imageId.IsValid() {
+		return nil, server_error.New("INVALID_IMAGE_ID", "image ID is invalid")
+	}
+
+	img, err := rep.db.client.PropertyImage.Query().
+		Where(propertyimage.IDEQ(int(imageId))).
+		Only(ctx)
+
+	if err != nil {
+		if client.IsNotFound(err) {
+			return nil, server_error.New("IMAGE_NOT_FOUND", "image not found")
+		}
+		return nil, server_error.Wrap("IMAGE_QUERY", "failed to query image", err)
+	}
+
+	return rep.entToDTO(img), nil
+}
+
 func (rep *PropertyImageRepository) GetImagesByPropertyId(ctx context.Context, propertyId models.RecordId) ([]models.PropertyImageDTO, error) {
 	if !propertyId.IsValid() {
 		return nil, server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
