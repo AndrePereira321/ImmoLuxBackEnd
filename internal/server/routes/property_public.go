@@ -93,6 +93,9 @@ func ListProperties(ctx *RouteContext) error {
 			filters.MaxPrice = &maxPrice
 		}
 	}
+	if orderBy := ctx.Ctx().Query("orderBy"); orderBy != "" {
+		filters.OrderBy = &orderBy
+	}
 
 	isPublished := true
 	filters.IsPublished = &isPublished

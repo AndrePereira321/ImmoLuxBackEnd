@@ -786,13 +786,17 @@ All contact endpoints require authentication (valid session cookie).
 | status | string | available, pending, sold, rented |
 | minPrice | float | Minimum price (inclusive) |
 | maxPrice | float | Maximum price (inclusive) |
+| orderBy | string | Sort order: price_asc, price_desc, created_asc, created_desc, popularity, location |
 | limit | int | Results per page (default: 20, max: 100) |
 | offset | int | Pagination offset (default: 0) |
 
-**Example Request**:
+**Example Requests**:
 
 ```
 GET /properties?district=Lisboa&municipality=Sintra&minPrice=200000&maxPrice=500000&limit=20&offset=0
+GET /properties?orderBy=popularity&limit=20
+GET /properties?orderBy=price_asc&district=Lisboa
+GET /properties?orderBy=location
 ```
 
 **Response**:
@@ -842,11 +846,21 @@ GET /properties?district=Lisboa&municipality=Sintra&minPrice=200000&maxPrice=500
 }
 ```
 
+**Sorting Options**:
+
+The `orderBy` parameter supports the following values:
+- `price_asc` - Price: Low to High
+- `price_desc` - Price: High to Low
+- `created_asc` - Oldest First
+- `created_desc` - Newest First (DEFAULT if orderBy not specified)
+- `popularity` - Most Viewed First (sorted by view_count DESC, then created_at DESC)
+- `location` - Alphabetically by District → Municipality → Parish
+
 **Notes**:
 
 - Only returns `isPublished: true` properties
 - Contact information included for each property
-- Results ordered by `created_at DESC` (newest first)
+- Default sort order: `created_desc` (newest first)
 - Total count provided for pagination
 
 ##### GET /properties/:id
@@ -939,7 +953,10 @@ Cache-Control: public, max-age=31536000
 
 **Authentication**: Required
 
-**Query Parameters**: Same as public list (but includes unpublished)
+**Query Parameters**: Same as public list, including:
+- `limit` - Results per page (default: 20)
+- `offset` - Pagination offset (default: 0)
+- `orderBy` - Sort order (same options as public list)
 
 **Response**: Same structure as public list
 
@@ -948,6 +965,7 @@ Cache-Control: public, max-age=31536000
 - Returns ALL user properties (published AND unpublished)
 - Contact information included for each property
 - Only shows properties where `publisher_id` matches authenticated user
+- Supports all sorting options (price_asc, price_desc, created_asc, created_desc, popularity, location)
 
 ##### POST /properties
 
@@ -1187,7 +1205,8 @@ displayOrder: 0  // Optional, auto-assigned if not provided
 - `PROPERTY_NOT_FOUND` - Property doesn't exist
 - `ACCESS_DENIED` - Property belongs to another user
 - `IMAGE_TOO_LARGE` - File size > 10MB
-- `INVALID_IMAGE_FORMAT` - Not JPEG or PNG
+- `INVALID_IMAGE_FORMAT` - Not a supported format (JPEG, PNG, WebP, TIFF, BMP)
+- `IMAGE_FORMAT_NOT_SUPPORTED` - HEIC/HEIF/AVIF detected (requires client-side conversion)
 - `IMAGE_PROCESSING_ERROR` - Failed to process image
 
 ##### PUT /images/:id/order
@@ -1439,9 +1458,12 @@ const uploadImages = async (propertyId: number) => {
 };
 ```
 
-### Property Listing/Browsing
+### Property Listing/Browsing with Sorting
 
 ```typescript
+// Sort options type
+type OrderBy = 'price_asc' | 'price_desc' | 'created_asc' | 'created_desc' | 'popularity' | 'location';
+
 // Filter state
 let filters = $state({
     district: '',
@@ -1450,6 +1472,7 @@ let filters = $state({
     propertyType: '',
     minPrice: null,
     maxPrice: null,
+    orderBy: 'created_desc' as OrderBy,
     limit: 20,
     offset: 0
 });
@@ -1470,6 +1493,7 @@ const loadProperties = async () => {
     if (filters.propertyType) params.append('propertyType', filters.propertyType);
     if (filters.minPrice) params.append('minPrice', filters.minPrice.toString());
     if (filters.maxPrice) params.append('maxPrice', filters.maxPrice.toString());
+    if (filters.orderBy) params.append('orderBy', filters.orderBy);
     params.append('limit', filters.limit.toString());
     params.append('offset', filters.offset.toString());
 
@@ -1484,6 +1508,16 @@ const loadProperties = async () => {
 
     loading = false;
 };
+
+// Sort dropdown UI
+<select bind:value={filters.orderBy} onchange={() => loadProperties()}>
+  <option value="created_desc">Newest First</option>
+  <option value="popularity">Most Popular</option>
+  <option value="price_asc">Price: Low to High</option>
+  <option value="price_desc">Price: High to Low</option>
+  <option value="location">Location (A-Z)</option>
+  <option value="created_asc">Oldest First</option>
+</select>
 
 // Property card component
 <div class = "property-card" >
@@ -1528,7 +1562,8 @@ const handlePropertyError = (error: ServerAPIError) => {
         'PROPERTY_VALIDATION': 'Please fill in all required fields',
         'CONTACT_ACCESS_DENIED': 'You can only use your own contacts',
         'IMAGE_TOO_LARGE': 'Image file size must be less than 10MB',
-        'INVALID_IMAGE_FORMAT': 'Only JPEG and PNG images are supported'
+        'INVALID_IMAGE_FORMAT': 'Supported formats: JPEG, PNG, WebP, TIFF, BMP',
+        'IMAGE_FORMAT_NOT_SUPPORTED': 'iPhone HEIC images require conversion. Please convert to JPEG first.'
     };
 
     return errorMessages[error.code || ''] || error.message || 'An error occurred';
@@ -1587,13 +1622,19 @@ energyRating: Aplus | A | B | C | D | E | F | G
 **Upload**:
 
 - Max file size: 10MB
-- Accepted formats: JPEG, PNG (validated by magic bytes)
-- Content type detection (not by extension)
+- Accepted formats: JPEG, PNG, WebP, TIFF, BMP (validated by magic bytes, not extension)
+- **Not supported**: HEIC, HEIF, AVIF (require native C libraries)
+- Content type detection by file signature (magic bytes)
+
+**For iPhone HEIC Images**:
+- Frontend should implement client-side conversion using JavaScript libraries like `heic2any`
+- Convert HEIC → JPEG/PNG/WebP before upload
+- Modern browsers support Canvas API for this conversion
 
 **Processing**:
 
 - Max dimensions: 1920x1920 (resized if larger, maintains aspect ratio)
-- Output format: JPEG at 85% quality
+- Output format: All images converted to JPEG at 85% quality
 - Stored as binary BYTEA in PostgreSQL
 
 ---
@@ -1637,7 +1678,8 @@ All errors follow this structure:
 
 - `IMAGE_NOT_FOUND` - Image doesn't exist
 - `IMAGE_TOO_LARGE` - File size exceeds 10MB
-- `INVALID_IMAGE_FORMAT` - Not JPEG or PNG
+- `INVALID_IMAGE_FORMAT` - Not a supported format
+- `IMAGE_FORMAT_NOT_SUPPORTED` - HEIC/HEIF/AVIF requires conversion (use client-side conversion)
 - `IMAGE_PROCESSING_ERROR` - Failed to process/resize image
 
 #### Authentication Errors
@@ -1701,7 +1743,7 @@ if (property) {
 
 **Repositories** (`internal/database/`):
 
-- `property_repository.go` - Property CRUD and validation
+- `property_repository.go` - Property CRUD, validation, and ordering (PropertyFilters with OrderBy support)
 - `contact_repository.go` - Contact CRUD
 - `property_image_repository.go` - Image CRUD and processing
 
@@ -1738,7 +1780,13 @@ if (property) {
 
 3. **Pagination**: Use `limit` and `offset` for property lists. Default limit is 20, max is 100.
 
-4. **View Counter**: Incremented on every GET /properties/:id request. Consider debouncing in frontend to avoid
+4. **Sorting Performance**: All sort options use database indexes:
+   - `price_asc/desc` - Uses price index
+   - `created_asc/desc` - Uses created_at index (default)
+   - `popularity` - Uses view_count + created_at indexes
+   - `location` - Uses district, municipality, parish indexes
+
+5. **View Counter**: Incremented on every GET /properties/:id request. Consider debouncing in frontend to avoid
    inflating counts.
 
 ### Security Considerations
@@ -1828,6 +1876,10 @@ if (property) {
 - [ ] Filter by district, municipality, parish
 - [ ] Filter by price range
 - [ ] Filter by property type
+- [ ] Sort by price (ascending/descending)
+- [ ] Sort by date (newest/oldest)
+- [ ] Sort by popularity (most viewed)
+- [ ] Sort by location (alphabetical)
 - [ ] View property details (verify view counter increments)
 - [ ] View property images
 - [ ] Verify drafts not visible to public

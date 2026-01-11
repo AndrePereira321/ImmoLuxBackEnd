@@ -32,6 +32,7 @@ type PropertyFilters struct {
 	PublisherID  *models.RecordId
 	Limit        int
 	Offset       int
+	OrderBy      *string // Options: "price_asc", "price_desc", "created_asc", "created_desc", "popularity", "location"
 }
 
 func (rep *PropertyRepository) CreateProperty(ctx context.Context, tx *client.Tx, propertyDTO *models.PropertyDTO) (models.RecordId, error) {
@@ -314,10 +315,33 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 		filters.Offset = 0
 	}
 
+	// Apply ordering
+	orderBy := "created_desc" // default
+	if filters.OrderBy != nil {
+		orderBy = *filters.OrderBy
+	}
+
+	switch orderBy {
+	case "price_asc":
+		query = query.Order(client.Asc(property.FieldPrice))
+	case "price_desc":
+		query = query.Order(client.Desc(property.FieldPrice))
+	case "created_asc":
+		query = query.Order(client.Asc(property.FieldCreatedAt))
+	case "created_desc":
+		query = query.Order(client.Desc(property.FieldCreatedAt))
+	case "popularity":
+		query = query.Order(client.Desc(property.FieldViewCount), client.Desc(property.FieldCreatedAt))
+	case "location":
+		query = query.Order(client.Asc(property.FieldDistrict), client.Asc(property.FieldMunicipality), client.Asc(property.FieldParish))
+	default:
+		// Default to newest first
+		query = query.Order(client.Desc(property.FieldCreatedAt))
+	}
+
 	properties, err := query.
 		Limit(filters.Limit).
 		Offset(filters.Offset).
-		Order(client.Desc(property.FieldCreatedAt)).
 		All(ctx)
 
 	if err != nil {

@@ -221,6 +221,10 @@ func ListMyProperties(ctx *RouteContext) error {
 		Offset:      offset,
 	}
 
+	if orderBy := ctx.Ctx().Query("orderBy"); orderBy != "" {
+		filters.OrderBy = &orderBy
+	}
+
 	properties, total, err := ctx.Db().NewPropertyRepository().ListProperties(context.Background(), filters)
 	if err != nil {
 		ctx.Logger().Error(fmt.Sprintf("Failed to list user properties: %s", err.Error()))
