@@ -62,20 +62,46 @@ func (s *Server) serveSPA() {
 		}
 
 		path := c.Path()
-		data, err := mfs.Open(path)
-		if err == nil {
-			ext := filepath.Ext(path)
-			if ext != "" {
-				c.Type(ext[1:])
-			}
-			return c.Send(data)
+		acceptEncoding := c.Get("Accept-Encoding")
+
+		if tryServeFile(c, mfs, path, acceptEncoding) {
+			return nil
 		}
 
-		data, err = mfs.Open("/index.html")
-		if err != nil {
-			return c.Status(404).SendString("Not found")
+		if tryServeFile(c, mfs, "/index.html", acceptEncoding) {
+			return nil
 		}
-		c.Type("html")
-		return c.Send(data)
+
+		return c.Status(404).SendString("Not found")
 	})
+}
+
+func tryServeFile(c fiber.Ctx, mfs *memoryFS, path string, acceptEncoding string) bool {
+	ext := filepath.Ext(path)
+
+	if strings.Contains(acceptEncoding, "br") && tryServeWithEncoding(c, mfs, path+".br", ext, "br") {
+		return true
+	}
+
+	if strings.Contains(acceptEncoding, "gzip") && tryServeWithEncoding(c, mfs, path+".gz", ext, "gzip") {
+		return true
+	}
+
+	return tryServeWithEncoding(c, mfs, path, ext, "")
+}
+
+func tryServeWithEncoding(c fiber.Ctx, mfs *memoryFS, path string, ext string, encoding string) bool {
+	data, err := mfs.Open(path)
+	if err != nil {
+		return false
+	}
+
+	if encoding != "" {
+		c.Set("Content-Encoding", encoding)
+	}
+	if ext != "" {
+		c.Type(ext[1:])
+	}
+	c.Send(data)
+	return true
 }
