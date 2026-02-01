@@ -66,6 +66,19 @@ check_command() {
     fi
 }
 
+check_node_version() {
+    NODE_VERSION=$(node --version | sed 's/v//' | cut -d. -f1)
+    if [ "$NODE_VERSION" -lt 20 ]; then
+        log_error "Node.js version 20+ is required. Current version: $(node --version)"
+        log_info "Install Node 20+:"
+        log_info "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+        log_info "  sudo apt install -y nodejs"
+        exit 1
+    fi
+    log_info "Node.js version check passed: v$NODE_VERSION"
+}
+
+
 ################################################################################
 # Pre-flight Checks
 ################################################################################
@@ -91,6 +104,7 @@ GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
 log_info "Go version: $GO_VERSION"
 
 # Check Node version
+check_node_version
 NODE_VERSION=$(node --version)
 log_info "Node version: $NODE_VERSION"
 
