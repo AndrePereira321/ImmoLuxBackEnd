@@ -4,7 +4,6 @@ package client
 
 import (
 	"fmt"
-	"immo-lux/internal/database/ent/client/contact"
 	"immo-lux/internal/database/ent/client/property"
 	"immo-lux/internal/database/ent/client/user"
 	"strings"
@@ -75,8 +74,6 @@ type Property struct {
 	EnergyRating *property.EnergyRating `json:"energy_rating,omitempty"`
 	// VirtualTourURL holds the value of the "virtual_tour_url" field.
 	VirtualTourURL *string `json:"virtual_tour_url,omitempty"`
-	// ContactID holds the value of the "contact_id" field.
-	ContactID int `json:"contact_id,omitempty"`
 	// PublisherID holds the value of the "publisher_id" field.
 	PublisherID int `json:"publisher_id,omitempty"`
 	// ViewCount holds the value of the "view_count" field.
@@ -97,8 +94,8 @@ type Property struct {
 type PropertyEdges struct {
 	// Publisher holds the value of the publisher edge.
 	Publisher *User `json:"publisher,omitempty"`
-	// Contact holds the value of the contact edge.
-	Contact *Contact `json:"contact,omitempty"`
+	// Contacts holds the value of the contacts edge.
+	Contacts []*Contact `json:"contacts,omitempty"`
 	// Images holds the value of the images edge.
 	Images []*PropertyImage `json:"images,omitempty"`
 	// loadedTypes holds the information for reporting if a
@@ -117,15 +114,13 @@ func (e PropertyEdges) PublisherOrErr() (*User, error) {
 	return nil, &NotLoadedError{edge: "publisher"}
 }
 
-// ContactOrErr returns the Contact value or an error if the edge
-// was not loaded in eager-loading, or loaded but was not found.
-func (e PropertyEdges) ContactOrErr() (*Contact, error) {
-	if e.Contact != nil {
-		return e.Contact, nil
-	} else if e.loadedTypes[1] {
-		return nil, &NotFoundError{label: contact.Label}
+// ContactsOrErr returns the Contacts value or an error if the edge
+// was not loaded in eager-loading.
+func (e PropertyEdges) ContactsOrErr() ([]*Contact, error) {
+	if e.loadedTypes[1] {
+		return e.Contacts, nil
 	}
-	return nil, &NotLoadedError{edge: "contact"}
+	return nil, &NotLoadedError{edge: "contacts"}
 }
 
 // ImagesOrErr returns the Images value or an error if the edge
@@ -146,7 +141,7 @@ func (*Property) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case property.FieldPrice, property.FieldLatitude, property.FieldLongitude, property.FieldAreaSqm, property.FieldLandAreaSqm:
 			values[i] = new(sql.NullFloat64)
-		case property.FieldID, property.FieldBedrooms, property.FieldBathrooms, property.FieldYearBuilt, property.FieldFloor, property.FieldTotalFloors, property.FieldParkingSpaces, property.FieldContactID, property.FieldPublisherID, property.FieldViewCount:
+		case property.FieldID, property.FieldBedrooms, property.FieldBathrooms, property.FieldYearBuilt, property.FieldFloor, property.FieldTotalFloors, property.FieldParkingSpaces, property.FieldPublisherID, property.FieldViewCount:
 			values[i] = new(sql.NullInt64)
 		case property.FieldTitle, property.FieldDescription, property.FieldPropertyType, property.FieldStatus, property.FieldAddress, property.FieldDistrict, property.FieldMunicipality, property.FieldParish, property.FieldPostalCode, property.FieldCountry, property.FieldEnergyRating, property.FieldVirtualTourURL:
 			values[i] = new(sql.NullString)
@@ -355,12 +350,6 @@ func (_m *Property) assignValues(columns []string, values []any) error {
 				_m.VirtualTourURL = new(string)
 				*_m.VirtualTourURL = value.String
 			}
-		case property.FieldContactID:
-			if value, ok := values[i].(*sql.NullInt64); !ok {
-				return fmt.Errorf("unexpected type %T for field contact_id", values[i])
-			} else if value.Valid {
-				_m.ContactID = int(value.Int64)
-			}
 		case property.FieldPublisherID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field publisher_id", values[i])
@@ -410,9 +399,9 @@ func (_m *Property) QueryPublisher() *UserQuery {
 	return NewPropertyClient(_m.config).QueryPublisher(_m)
 }
 
-// QueryContact queries the "contact" edge of the Property entity.
-func (_m *Property) QueryContact() *ContactQuery {
-	return NewPropertyClient(_m.config).QueryContact(_m)
+// QueryContacts queries the "contacts" edge of the Property entity.
+func (_m *Property) QueryContacts() *ContactQuery {
+	return NewPropertyClient(_m.config).QueryContacts(_m)
 }
 
 // QueryImages queries the "images" edge of the Property entity.
@@ -554,9 +543,6 @@ func (_m *Property) String() string {
 		builder.WriteString("virtual_tour_url=")
 		builder.WriteString(*v)
 	}
-	builder.WriteString(", ")
-	builder.WriteString("contact_id=")
-	builder.WriteString(fmt.Sprintf("%v", _m.ContactID))
 	builder.WriteString(", ")
 	builder.WriteString("publisher_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PublisherID))

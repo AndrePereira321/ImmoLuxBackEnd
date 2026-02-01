@@ -58,9 +58,6 @@ func (Property) Fields() []ent.Field {
 		// Virtual tour
 		field.String("virtual_tour_url").Optional().Nillable().MaxLen(500),
 
-		// Contact information
-		field.Int("contact_id").Positive(),
-
 		// Publisher information
 		field.Int("publisher_id").Positive(),
 
@@ -79,11 +76,8 @@ func (Property) Edges() []ent.Edge {
 			Unique().
 			Required().
 			Field("publisher_id"),
-		edge.From("contact", Contact.Type).
-			Ref("properties").
-			Unique().
-			Required().
-			Field("contact_id"),
+		edge.From("contacts", Contact.Type).
+			Ref("properties"),
 		edge.To("images", PropertyImage.Type),
 	}
 }

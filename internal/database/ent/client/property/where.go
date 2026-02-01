@@ -180,11 +180,6 @@ func VirtualTourURL(v string) predicate.Property {
 	return predicate.Property(sql.FieldEQ(FieldVirtualTourURL, v))
 }
 
-// ContactID applies equality check predicate on the "contact_id" field. It's identical to ContactIDEQ.
-func ContactID(v int) predicate.Property {
-	return predicate.Property(sql.FieldEQ(FieldContactID, v))
-}
-
 // PublisherID applies equality check predicate on the "publisher_id" field. It's identical to PublisherIDEQ.
 func PublisherID(v int) predicate.Property {
 	return predicate.Property(sql.FieldEQ(FieldPublisherID, v))
@@ -1485,26 +1480,6 @@ func VirtualTourURLContainsFold(v string) predicate.Property {
 	return predicate.Property(sql.FieldContainsFold(FieldVirtualTourURL, v))
 }
 
-// ContactIDEQ applies the EQ predicate on the "contact_id" field.
-func ContactIDEQ(v int) predicate.Property {
-	return predicate.Property(sql.FieldEQ(FieldContactID, v))
-}
-
-// ContactIDNEQ applies the NEQ predicate on the "contact_id" field.
-func ContactIDNEQ(v int) predicate.Property {
-	return predicate.Property(sql.FieldNEQ(FieldContactID, v))
-}
-
-// ContactIDIn applies the In predicate on the "contact_id" field.
-func ContactIDIn(vs ...int) predicate.Property {
-	return predicate.Property(sql.FieldIn(FieldContactID, vs...))
-}
-
-// ContactIDNotIn applies the NotIn predicate on the "contact_id" field.
-func ContactIDNotIn(vs ...int) predicate.Property {
-	return predicate.Property(sql.FieldNotIn(FieldContactID, vs...))
-}
-
 // PublisherIDEQ applies the EQ predicate on the "publisher_id" field.
 func PublisherIDEQ(v int) predicate.Property {
 	return predicate.Property(sql.FieldEQ(FieldPublisherID, v))
@@ -1718,21 +1693,21 @@ func HasPublisherWith(preds ...predicate.User) predicate.Property {
 	})
 }
 
-// HasContact applies the HasEdge predicate on the "contact" edge.
-func HasContact() predicate.Property {
+// HasContacts applies the HasEdge predicate on the "contacts" edge.
+func HasContacts() predicate.Property {
 	return predicate.Property(func(s *sql.Selector) {
 		step := sqlgraph.NewStep(
 			sqlgraph.From(Table, FieldID),
-			sqlgraph.Edge(sqlgraph.M2O, true, ContactTable, ContactColumn),
+			sqlgraph.Edge(sqlgraph.M2M, true, ContactsTable, ContactsPrimaryKey...),
 		)
 		sqlgraph.HasNeighbors(s, step)
 	})
 }
 
-// HasContactWith applies the HasEdge predicate on the "contact" edge with a given conditions (other predicates).
-func HasContactWith(preds ...predicate.Contact) predicate.Property {
+// HasContactsWith applies the HasEdge predicate on the "contacts" edge with a given conditions (other predicates).
+func HasContactsWith(preds ...predicate.Contact) predicate.Property {
 	return predicate.Property(func(s *sql.Selector) {
-		step := newContactStep()
+		step := newContactsStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

@@ -255,26 +255,22 @@ func init() {
 	propertyDescVirtualTourURL := propertyFields[27].Descriptor()
 	// property.VirtualTourURLValidator is a validator for the "virtual_tour_url" field. It is called by the builders before save.
 	property.VirtualTourURLValidator = propertyDescVirtualTourURL.Validators[0].(func(string) error)
-	// propertyDescContactID is the schema descriptor for contact_id field.
-	propertyDescContactID := propertyFields[28].Descriptor()
-	// property.ContactIDValidator is a validator for the "contact_id" field. It is called by the builders before save.
-	property.ContactIDValidator = propertyDescContactID.Validators[0].(func(int) error)
 	// propertyDescPublisherID is the schema descriptor for publisher_id field.
-	propertyDescPublisherID := propertyFields[29].Descriptor()
+	propertyDescPublisherID := propertyFields[28].Descriptor()
 	// property.PublisherIDValidator is a validator for the "publisher_id" field. It is called by the builders before save.
 	property.PublisherIDValidator = propertyDescPublisherID.Validators[0].(func(int) error)
 	// propertyDescViewCount is the schema descriptor for view_count field.
-	propertyDescViewCount := propertyFields[30].Descriptor()
+	propertyDescViewCount := propertyFields[29].Descriptor()
 	// property.DefaultViewCount holds the default value on creation for the view_count field.
 	property.DefaultViewCount = propertyDescViewCount.Default.(int)
 	// property.ViewCountValidator is a validator for the "view_count" field. It is called by the builders before save.
 	property.ViewCountValidator = propertyDescViewCount.Validators[0].(func(int) error)
 	// propertyDescCreatedAt is the schema descriptor for created_at field.
-	propertyDescCreatedAt := propertyFields[32].Descriptor()
+	propertyDescCreatedAt := propertyFields[31].Descriptor()
 	// property.DefaultCreatedAt holds the default value on creation for the created_at field.
 	property.DefaultCreatedAt = propertyDescCreatedAt.Default.(func() time.Time)
 	// propertyDescUpdatedAt is the schema descriptor for updated_at field.
-	propertyDescUpdatedAt := propertyFields[33].Descriptor()
+	propertyDescUpdatedAt := propertyFields[32].Descriptor()
 	// property.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	property.DefaultUpdatedAt = propertyDescUpdatedAt.Default.(func() time.Time)
 	// property.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.

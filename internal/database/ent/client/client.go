@@ -545,7 +545,7 @@ func (c *ContactClient) QueryProperties(_m *Contact) *PropertyQuery {
 		step := sqlgraph.NewStep(
 			sqlgraph.From(contact.Table, contact.FieldID, id),
 			sqlgraph.To(property.Table, property.FieldID),
-			sqlgraph.Edge(sqlgraph.O2M, false, contact.PropertiesTable, contact.PropertiesColumn),
+			sqlgraph.Edge(sqlgraph.M2M, false, contact.PropertiesTable, contact.PropertiesPrimaryKey...),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -702,15 +702,15 @@ func (c *PropertyClient) QueryPublisher(_m *Property) *UserQuery {
 	return query
 }
 
-// QueryContact queries the contact edge of a Property.
-func (c *PropertyClient) QueryContact(_m *Property) *ContactQuery {
+// QueryContacts queries the contacts edge of a Property.
+func (c *PropertyClient) QueryContacts(_m *Property) *ContactQuery {
 	query := (&ContactClient{config: c.config}).Query()
 	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
 		id := _m.ID
 		step := sqlgraph.NewStep(
 			sqlgraph.From(property.Table, property.FieldID, id),
 			sqlgraph.To(contact.Table, contact.FieldID),
-			sqlgraph.Edge(sqlgraph.M2O, true, property.ContactTable, property.ContactColumn),
+			sqlgraph.Edge(sqlgraph.M2M, true, property.ContactsTable, property.ContactsPrimaryKey...),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil

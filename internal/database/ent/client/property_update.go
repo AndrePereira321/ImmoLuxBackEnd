@@ -584,20 +584,6 @@ func (_u *PropertyUpdate) ClearVirtualTourURL() *PropertyUpdate {
 	return _u
 }
 
-// SetContactID sets the "contact_id" field.
-func (_u *PropertyUpdate) SetContactID(v int) *PropertyUpdate {
-	_u.mutation.SetContactID(v)
-	return _u
-}
-
-// SetNillableContactID sets the "contact_id" field if the given value is not nil.
-func (_u *PropertyUpdate) SetNillableContactID(v *int) *PropertyUpdate {
-	if v != nil {
-		_u.SetContactID(*v)
-	}
-	return _u
-}
-
 // SetPublisherID sets the "publisher_id" field.
 func (_u *PropertyUpdate) SetPublisherID(v int) *PropertyUpdate {
 	_u.mutation.SetPublisherID(v)
@@ -664,9 +650,19 @@ func (_u *PropertyUpdate) SetPublisher(v *User) *PropertyUpdate {
 	return _u.SetPublisherID(v.ID)
 }
 
-// SetContact sets the "contact" edge to the Contact entity.
-func (_u *PropertyUpdate) SetContact(v *Contact) *PropertyUpdate {
-	return _u.SetContactID(v.ID)
+// AddContactIDs adds the "contacts" edge to the Contact entity by IDs.
+func (_u *PropertyUpdate) AddContactIDs(ids ...int) *PropertyUpdate {
+	_u.mutation.AddContactIDs(ids...)
+	return _u
+}
+
+// AddContacts adds the "contacts" edges to the Contact entity.
+func (_u *PropertyUpdate) AddContacts(v ...*Contact) *PropertyUpdate {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddContactIDs(ids...)
 }
 
 // AddImageIDs adds the "images" edge to the PropertyImage entity by IDs.
@@ -695,10 +691,25 @@ func (_u *PropertyUpdate) ClearPublisher() *PropertyUpdate {
 	return _u
 }
 
-// ClearContact clears the "contact" edge to the Contact entity.
-func (_u *PropertyUpdate) ClearContact() *PropertyUpdate {
-	_u.mutation.ClearContact()
+// ClearContacts clears all "contacts" edges to the Contact entity.
+func (_u *PropertyUpdate) ClearContacts() *PropertyUpdate {
+	_u.mutation.ClearContacts()
 	return _u
+}
+
+// RemoveContactIDs removes the "contacts" edge to Contact entities by IDs.
+func (_u *PropertyUpdate) RemoveContactIDs(ids ...int) *PropertyUpdate {
+	_u.mutation.RemoveContactIDs(ids...)
+	return _u
+}
+
+// RemoveContacts removes "contacts" edges to Contact entities.
+func (_u *PropertyUpdate) RemoveContacts(v ...*Contact) *PropertyUpdate {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveContactIDs(ids...)
 }
 
 // ClearImages clears all "images" edges to the PropertyImage entity.
@@ -850,11 +861,6 @@ func (_u *PropertyUpdate) check() error {
 			return &ValidationError{Name: "virtual_tour_url", err: fmt.Errorf(`client: validator failed for field "Property.virtual_tour_url": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.ContactID(); ok {
-		if err := property.ContactIDValidator(v); err != nil {
-			return &ValidationError{Name: "contact_id", err: fmt.Errorf(`client: validator failed for field "Property.contact_id": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.PublisherID(); ok {
 		if err := property.PublisherIDValidator(v); err != nil {
 			return &ValidationError{Name: "publisher_id", err: fmt.Errorf(`client: validator failed for field "Property.publisher_id": %w`, err)}
@@ -867,9 +873,6 @@ func (_u *PropertyUpdate) check() error {
 	}
 	if _u.mutation.PublisherCleared() && len(_u.mutation.PublisherIDs()) > 0 {
 		return errors.New(`client: clearing a required unique edge "Property.publisher"`)
-	}
-	if _u.mutation.ContactCleared() && len(_u.mutation.ContactIDs()) > 0 {
-		return errors.New(`client: clearing a required unique edge "Property.contact"`)
 	}
 	return nil
 }
@@ -1089,12 +1092,12 @@ func (_u *PropertyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
-	if _u.mutation.ContactCleared() {
+	if _u.mutation.ContactsCleared() {
 		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
+			Rel:     sqlgraph.M2M,
 			Inverse: true,
-			Table:   property.ContactTable,
-			Columns: []string{property.ContactColumn},
+			Table:   property.ContactsTable,
+			Columns: property.ContactsPrimaryKey,
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),
@@ -1102,12 +1105,28 @@ func (_u *PropertyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
 	}
-	if nodes := _u.mutation.ContactIDs(); len(nodes) > 0 {
+	if nodes := _u.mutation.RemovedContactsIDs(); len(nodes) > 0 && !_u.mutation.ContactsCleared() {
 		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
+			Rel:     sqlgraph.M2M,
 			Inverse: true,
-			Table:   property.ContactTable,
-			Columns: []string{property.ContactColumn},
+			Table:   property.ContactsTable,
+			Columns: property.ContactsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ContactsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   property.ContactsTable,
+			Columns: property.ContactsPrimaryKey,
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),
@@ -1736,20 +1755,6 @@ func (_u *PropertyUpdateOne) ClearVirtualTourURL() *PropertyUpdateOne {
 	return _u
 }
 
-// SetContactID sets the "contact_id" field.
-func (_u *PropertyUpdateOne) SetContactID(v int) *PropertyUpdateOne {
-	_u.mutation.SetContactID(v)
-	return _u
-}
-
-// SetNillableContactID sets the "contact_id" field if the given value is not nil.
-func (_u *PropertyUpdateOne) SetNillableContactID(v *int) *PropertyUpdateOne {
-	if v != nil {
-		_u.SetContactID(*v)
-	}
-	return _u
-}
-
 // SetPublisherID sets the "publisher_id" field.
 func (_u *PropertyUpdateOne) SetPublisherID(v int) *PropertyUpdateOne {
 	_u.mutation.SetPublisherID(v)
@@ -1816,9 +1821,19 @@ func (_u *PropertyUpdateOne) SetPublisher(v *User) *PropertyUpdateOne {
 	return _u.SetPublisherID(v.ID)
 }
 
-// SetContact sets the "contact" edge to the Contact entity.
-func (_u *PropertyUpdateOne) SetContact(v *Contact) *PropertyUpdateOne {
-	return _u.SetContactID(v.ID)
+// AddContactIDs adds the "contacts" edge to the Contact entity by IDs.
+func (_u *PropertyUpdateOne) AddContactIDs(ids ...int) *PropertyUpdateOne {
+	_u.mutation.AddContactIDs(ids...)
+	return _u
+}
+
+// AddContacts adds the "contacts" edges to the Contact entity.
+func (_u *PropertyUpdateOne) AddContacts(v ...*Contact) *PropertyUpdateOne {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddContactIDs(ids...)
 }
 
 // AddImageIDs adds the "images" edge to the PropertyImage entity by IDs.
@@ -1847,10 +1862,25 @@ func (_u *PropertyUpdateOne) ClearPublisher() *PropertyUpdateOne {
 	return _u
 }
 
-// ClearContact clears the "contact" edge to the Contact entity.
-func (_u *PropertyUpdateOne) ClearContact() *PropertyUpdateOne {
-	_u.mutation.ClearContact()
+// ClearContacts clears all "contacts" edges to the Contact entity.
+func (_u *PropertyUpdateOne) ClearContacts() *PropertyUpdateOne {
+	_u.mutation.ClearContacts()
 	return _u
+}
+
+// RemoveContactIDs removes the "contacts" edge to Contact entities by IDs.
+func (_u *PropertyUpdateOne) RemoveContactIDs(ids ...int) *PropertyUpdateOne {
+	_u.mutation.RemoveContactIDs(ids...)
+	return _u
+}
+
+// RemoveContacts removes "contacts" edges to Contact entities.
+func (_u *PropertyUpdateOne) RemoveContacts(v ...*Contact) *PropertyUpdateOne {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveContactIDs(ids...)
 }
 
 // ClearImages clears all "images" edges to the PropertyImage entity.
@@ -2015,11 +2045,6 @@ func (_u *PropertyUpdateOne) check() error {
 			return &ValidationError{Name: "virtual_tour_url", err: fmt.Errorf(`client: validator failed for field "Property.virtual_tour_url": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.ContactID(); ok {
-		if err := property.ContactIDValidator(v); err != nil {
-			return &ValidationError{Name: "contact_id", err: fmt.Errorf(`client: validator failed for field "Property.contact_id": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.PublisherID(); ok {
 		if err := property.PublisherIDValidator(v); err != nil {
 			return &ValidationError{Name: "publisher_id", err: fmt.Errorf(`client: validator failed for field "Property.publisher_id": %w`, err)}
@@ -2032,9 +2057,6 @@ func (_u *PropertyUpdateOne) check() error {
 	}
 	if _u.mutation.PublisherCleared() && len(_u.mutation.PublisherIDs()) > 0 {
 		return errors.New(`client: clearing a required unique edge "Property.publisher"`)
-	}
-	if _u.mutation.ContactCleared() && len(_u.mutation.ContactIDs()) > 0 {
-		return errors.New(`client: clearing a required unique edge "Property.contact"`)
 	}
 	return nil
 }
@@ -2271,12 +2293,12 @@ func (_u *PropertyUpdateOne) sqlSave(ctx context.Context) (_node *Property, err 
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
-	if _u.mutation.ContactCleared() {
+	if _u.mutation.ContactsCleared() {
 		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
+			Rel:     sqlgraph.M2M,
 			Inverse: true,
-			Table:   property.ContactTable,
-			Columns: []string{property.ContactColumn},
+			Table:   property.ContactsTable,
+			Columns: property.ContactsPrimaryKey,
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),
@@ -2284,12 +2306,28 @@ func (_u *PropertyUpdateOne) sqlSave(ctx context.Context) (_node *Property, err 
 		}
 		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
 	}
-	if nodes := _u.mutation.ContactIDs(); len(nodes) > 0 {
+	if nodes := _u.mutation.RemovedContactsIDs(); len(nodes) > 0 && !_u.mutation.ContactsCleared() {
 		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
+			Rel:     sqlgraph.M2M,
 			Inverse: true,
-			Table:   property.ContactTable,
-			Columns: []string{property.ContactColumn},
+			Table:   property.ContactsTable,
+			Columns: property.ContactsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ContactsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   property.ContactsTable,
+			Columns: property.ContactsPrimaryKey,
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),

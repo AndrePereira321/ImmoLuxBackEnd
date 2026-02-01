@@ -488,7 +488,7 @@ func HasProperties() predicate.Contact {
 	return predicate.Contact(func(s *sql.Selector) {
 		step := sqlgraph.NewStep(
 			sqlgraph.From(Table, FieldID),
-			sqlgraph.Edge(sqlgraph.O2M, false, PropertiesTable, PropertiesColumn),
+			sqlgraph.Edge(sqlgraph.M2M, false, PropertiesTable, PropertiesPrimaryKey...),
 		)
 		sqlgraph.HasNeighbors(s, step)
 	})

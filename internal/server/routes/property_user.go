@@ -22,66 +22,66 @@ type ContactPayload struct {
 }
 
 type CreatePropertyPayload struct {
-	Title          string          `json:"title"`
-	Description    string          `json:"description"`
-	PropertyType   string          `json:"propertyType"`
-	Price          float64         `json:"price"`
-	Status         string          `json:"status"`
-	Address        string          `json:"address"`
-	District       string          `json:"district"`
-	Municipality   string          `json:"municipality"`
-	Parish         *string         `json:"parish"`
-	PostalCode     *string         `json:"postalCode"`
-	Country        string          `json:"country"`
-	Latitude       *float64        `json:"latitude"`
-	Longitude      *float64        `json:"longitude"`
-	Bedrooms       *int            `json:"bedrooms"`
-	Bathrooms      *int            `json:"bathrooms"`
-	AreaSqm        *float64        `json:"areaSqm"`
-	LandAreaSqm    *float64        `json:"landAreaSqm"`
-	YearBuilt      *int            `json:"yearBuilt"`
-	Floor          *int            `json:"floor"`
-	TotalFloors    *int            `json:"totalFloors"`
-	ParkingSpaces  *int            `json:"parkingSpaces"`
-	HasGarage      bool            `json:"hasGarage"`
-	HasGarden      bool            `json:"hasGarden"`
-	HasPool        bool            `json:"hasPool"`
-	HasElevator    bool            `json:"hasElevator"`
-	EnergyRating   *string         `json:"energyRating"`
-	VirtualTourURL *string         `json:"virtualTourUrl"`
-	Contact        *ContactPayload `json:"contact"`
+	Title          string           `json:"title"`
+	Description    string           `json:"description"`
+	PropertyType   string           `json:"propertyType"`
+	Price          float64          `json:"price"`
+	Status         string           `json:"status"`
+	Address        string           `json:"address"`
+	District       string           `json:"district"`
+	Municipality   string           `json:"municipality"`
+	Parish         *string          `json:"parish"`
+	PostalCode     *string          `json:"postalCode"`
+	Country        string           `json:"country"`
+	Latitude       *float64         `json:"latitude"`
+	Longitude      *float64         `json:"longitude"`
+	Bedrooms       *int             `json:"bedrooms"`
+	Bathrooms      *int             `json:"bathrooms"`
+	AreaSqm        *float64         `json:"areaSqm"`
+	LandAreaSqm    *float64         `json:"landAreaSqm"`
+	YearBuilt      *int             `json:"yearBuilt"`
+	Floor          *int             `json:"floor"`
+	TotalFloors    *int             `json:"totalFloors"`
+	ParkingSpaces  *int             `json:"parkingSpaces"`
+	HasGarage      bool             `json:"hasGarage"`
+	HasGarden      bool             `json:"hasGarden"`
+	HasPool        bool             `json:"hasPool"`
+	HasElevator    bool             `json:"hasElevator"`
+	EnergyRating   *string          `json:"energyRating"`
+	VirtualTourURL *string          `json:"virtualTourUrl"`
+	Contacts       []ContactPayload `json:"contacts"` // Changed from singular to plural array
 }
 
 type UpdatePropertyPayload struct {
-	Title          *string  `json:"title"`
-	Description    *string  `json:"description"`
-	PropertyType   *string  `json:"propertyType"`
-	Price          *float64 `json:"price"`
-	Status         *string  `json:"status"`
-	IsPublished    *bool    `json:"isPublished"`
-	Address        *string  `json:"address"`
-	District       *string  `json:"district"`
-	Municipality   *string  `json:"municipality"`
-	Parish         *string  `json:"parish"`
-	PostalCode     *string  `json:"postalCode"`
-	Country        *string  `json:"country"`
-	Latitude       *float64 `json:"latitude"`
-	Longitude      *float64 `json:"longitude"`
-	Bedrooms       *int     `json:"bedrooms"`
-	Bathrooms      *int     `json:"bathrooms"`
-	AreaSqm        *float64 `json:"areaSqm"`
-	LandAreaSqm    *float64 `json:"landAreaSqm"`
-	YearBuilt      *int     `json:"yearBuilt"`
-	Floor          *int     `json:"floor"`
-	TotalFloors    *int     `json:"totalFloors"`
-	ParkingSpaces  *int     `json:"parkingSpaces"`
-	HasGarage      *bool    `json:"hasGarage"`
-	HasGarden      *bool    `json:"hasGarden"`
-	HasPool        *bool    `json:"hasPool"`
-	HasElevator    *bool    `json:"hasElevator"`
-	EnergyRating   *string  `json:"energyRating"`
-	VirtualTourURL *string  `json:"virtualTourUrl"`
-	ContactID      *int64   `json:"contactId"`
+	Title          *string          `json:"title"`
+	Description    *string          `json:"description"`
+	PropertyType   *string          `json:"propertyType"`
+	Price          *float64         `json:"price"`
+	Status         *string          `json:"status"`
+	IsPublished    *bool            `json:"isPublished"`
+	Address        *string          `json:"address"`
+	District       *string          `json:"district"`
+	Municipality   *string          `json:"municipality"`
+	Parish         *string          `json:"parish"`
+	PostalCode     *string          `json:"postalCode"`
+	Country        *string          `json:"country"`
+	Latitude       *float64         `json:"latitude"`
+	Longitude      *float64         `json:"longitude"`
+	Bedrooms       *int             `json:"bedrooms"`
+	Bathrooms      *int             `json:"bathrooms"`
+	AreaSqm        *float64         `json:"areaSqm"`
+	LandAreaSqm    *float64         `json:"landAreaSqm"`
+	YearBuilt      *int             `json:"yearBuilt"`
+	Floor          *int             `json:"floor"`
+	TotalFloors    *int             `json:"totalFloors"`
+	ParkingSpaces  *int             `json:"parkingSpaces"`
+	HasGarage      *bool            `json:"hasGarage"`
+	HasGarden      *bool            `json:"hasGarden"`
+	HasPool        *bool            `json:"hasPool"`
+	HasElevator    *bool            `json:"hasElevator"`
+	EnergyRating   *string          `json:"energyRating"`
+	VirtualTourURL *string          `json:"virtualTourUrl"`
+	Contacts       []ContactPayload `json:"contacts"` // Changed from contactId to contacts array
 }
 
 func CreateProperty(ctx *RouteContext) error {
@@ -95,43 +95,50 @@ func CreateProperty(ctx *RouteContext) error {
 		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
 	}
 
-	if payload.Contact == nil {
-		return ctx.BadRequest("Contact information is required")
+	if len(payload.Contacts) == 0 {
+		return ctx.BadRequest("At least one contact is required")
 	}
 
-	var contactId models.RecordId
+	var contactIDs []models.RecordId
 	var propertyId models.RecordId
 
 	err := ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		if payload.Contact.ID != nil {
-			contactId = models.RecordId(*payload.Contact.ID)
+		// Process each contact in the payload
+		for _, contactPayload := range payload.Contacts {
+			if contactPayload.ID != nil {
+				// Using existing contact
+				contactId := models.RecordId(*contactPayload.ID)
 
-			existingContact, err := ctx.Db().NewContactRepository().GetContactById(txCtx, contactId)
-			if err != nil {
-				return err
-			}
+				existingContact, err := ctx.Db().NewContactRepository().GetContactById(txCtx, contactId)
+				if err != nil {
+					return err
+				}
 
-			if *existingContact.UserID != userId {
-				return server_error.New("CONTACT_ACCESS_DENIED", "You can only use your own contacts")
-			}
-		} else {
-			if payload.Contact.Name == nil || payload.Contact.Email == nil || payload.Contact.Phone == nil {
-				return server_error.New("CONTACT_VALIDATION", "Contact name, email, and phone are required")
-			}
+				if *existingContact.UserID != userId {
+					return server_error.New("CONTACT_ACCESS_DENIED", "You can only use your own contacts")
+				}
 
-			contactDTO := &models.ContactDTO{
-				UserID: &userId,
-				Name:   payload.Contact.Name,
-				Email:  payload.Contact.Email,
-				Phone:  payload.Contact.Phone,
-				Notes:  payload.Contact.Notes,
-			}
+				contactIDs = append(contactIDs, contactId)
+			} else {
+				// Creating new contact
+				if contactPayload.Name == nil || contactPayload.Email == nil || contactPayload.Phone == nil {
+					return server_error.New("CONTACT_VALIDATION", "Contact name, email, and phone are required")
+				}
 
-			id, err := ctx.Db().NewContactRepository().CreateContact(txCtx, tx, contactDTO)
-			if err != nil {
-				return err
+				contactDTO := &models.ContactDTO{
+					UserID: &userId,
+					Name:   contactPayload.Name,
+					Email:  contactPayload.Email,
+					Phone:  contactPayload.Phone,
+					Notes:  contactPayload.Notes,
+				}
+
+				id, err := ctx.Db().NewContactRepository().CreateContact(txCtx, tx, contactDTO)
+				if err != nil {
+					return err
+				}
+				contactIDs = append(contactIDs, id)
 			}
-			contactId = id
 		}
 
 		isPublished := false
@@ -164,7 +171,7 @@ func CreateProperty(ctx *RouteContext) error {
 			HasElevator:    &payload.HasElevator,
 			EnergyRating:   payload.EnergyRating,
 			VirtualTourURL: payload.VirtualTourURL,
-			ContactID:      &contactId,
+			ContactIDs:     contactIDs,
 			PublisherID:    &userId,
 		}
 
@@ -188,10 +195,7 @@ func CreateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	contact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
-	if err == nil {
-		createdProperty.Contact = contact
-	}
+	// Contacts are automatically loaded via WithContacts() in GetPropertyById
 
 	return ctx.RespondData(createdProperty)
 }
@@ -231,14 +235,7 @@ func ListMyProperties(ctx *RouteContext) error {
 		return err
 	}
 
-	for i := range properties {
-		if properties[i].ContactID != nil {
-			contact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), *properties[i].ContactID)
-			if err == nil {
-				properties[i].Contact = contact
-			}
-		}
-	}
+	// Contacts are automatically loaded via WithContacts() in ListProperties
 
 	return ctx.RespondData(&PropertyListResponse{
 		Properties: properties,
@@ -276,14 +273,21 @@ func UpdateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	if payload.ContactID != nil {
-		contactId := models.RecordId(*payload.ContactID)
-		existingContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
-		if err != nil {
-			return ctx.BadRequest("Invalid contact ID")
-		}
-		if *existingContact.UserID != userId {
-			return ctx.RespondError(fiber.StatusForbidden, "CONTACT_ACCESS_DENIED", "You can only use your own contacts")
+	// Validate and process contacts if provided
+	var contactIDs []models.RecordId
+	if len(payload.Contacts) > 0 {
+		for _, contactPayload := range payload.Contacts {
+			if contactPayload.ID != nil {
+				contactId := models.RecordId(*contactPayload.ID)
+				existingContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
+				if err != nil {
+					return ctx.BadRequest("Invalid contact ID")
+				}
+				if *existingContact.UserID != userId {
+					return ctx.RespondError(fiber.StatusForbidden, "CONTACT_ACCESS_DENIED", "You can only use your own contacts")
+				}
+				contactIDs = append(contactIDs, contactId)
+			}
 		}
 	}
 
@@ -318,13 +322,20 @@ func UpdateProperty(ctx *RouteContext) error {
 		VirtualTourURL: payload.VirtualTourURL,
 	}
 
-	if payload.ContactID != nil {
-		contactId := models.RecordId(*payload.ContactID)
-		propertyDTO.ContactID = &contactId
-	}
-
 	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		return ctx.Db().NewPropertyRepository().UpdateProperty(txCtx, tx, propertyId, propertyDTO)
+		// Update property fields
+		if err := ctx.Db().NewPropertyRepository().UpdateProperty(txCtx, tx, propertyId, propertyDTO); err != nil {
+			return err
+		}
+
+		// Update contacts if provided
+		if len(contactIDs) > 0 {
+			if err := ctx.Db().NewPropertyRepository().UpdatePropertyContacts(txCtx, tx, propertyId, contactIDs); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -339,12 +350,7 @@ func UpdateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	if updatedProperty.ContactID != nil {
-		contact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), *updatedProperty.ContactID)
-		if err == nil {
-			updatedProperty.Contact = contact
-		}
-	}
+	// Contacts are automatically loaded via WithContacts() in GetPropertyById
 
 	return ctx.RespondData(updatedProperty)
 }

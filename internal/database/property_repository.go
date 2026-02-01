@@ -53,7 +53,6 @@ func (rep *PropertyRepository) CreateProperty(ctx context.Context, tx *client.Tx
 		SetDistrict(*propertyDTO.District).
 		SetMunicipality(*propertyDTO.Municipality).
 		SetCountry(*propertyDTO.Country).
-		SetContactID(int(*propertyDTO.ContactID)).
 		SetPublisherID(int(*propertyDTO.PublisherID))
 
 	if propertyDTO.IsPublished != nil {
@@ -114,6 +113,15 @@ func (rep *PropertyRepository) CreateProperty(ctx context.Context, tx *client.Tx
 		builder.SetVirtualTourURL(*propertyDTO.VirtualTourURL)
 	}
 
+	// Add contacts to property if provided
+	if len(propertyDTO.ContactIDs) > 0 {
+		contactIDs := make([]int, len(propertyDTO.ContactIDs))
+		for i, contactID := range propertyDTO.ContactIDs {
+			contactIDs[i] = int(contactID)
+		}
+		builder.AddContactIDs(contactIDs...)
+	}
+
 	createdProperty, err := builder.Save(ctx)
 	if err != nil {
 		rep.db.Logger().Error(fmt.Sprintf("Failed to create property [%s]: %s", *propertyDTO.Title, err.Error()))
@@ -131,6 +139,7 @@ func (rep *PropertyRepository) GetPropertyById(ctx context.Context, propertyId m
 
 	prop, err := rep.db.client.Property.Query().
 		Where(property.IDEQ(int(propertyId))).
+		WithContacts().
 		Only(ctx)
 
 	if err != nil {
@@ -236,9 +245,6 @@ func (rep *PropertyRepository) UpdateProperty(ctx context.Context, tx *client.Tx
 	if propertyDTO.VirtualTourURL != nil {
 		builder.SetNillableVirtualTourURL(propertyDTO.VirtualTourURL)
 	}
-	if propertyDTO.ContactID != nil {
-		builder.SetContactID(int(*propertyDTO.ContactID))
-	}
 
 	err := builder.Exec(ctx)
 	if err != nil {
@@ -331,7 +337,7 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 	// For status ordering, we need to fetch all results and sort in-memory
 	if orderBy == "status" {
 		// Fetch all matching properties without limit/offset
-		allProperties, err := query.All(ctx)
+		allProperties, err := query.WithContacts().All(ctx)
 		if err != nil {
 			return nil, 0, server_error.Wrap("PROPERTY_LIST", "failed to list properties", err)
 		}
@@ -403,6 +409,7 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 	}
 
 	properties, err := query.
+		WithContacts().
 		Limit(filters.Limit).
 		Offset(filters.Offset).
 		All(ctx)
@@ -461,6 +468,39 @@ func (rep *PropertyRepository) UnpublishProperty(ctx context.Context, tx *client
 	return nil
 }
 
+func (rep *PropertyRepository) UpdatePropertyContacts(ctx context.Context, tx *client.Tx, propertyId models.RecordId, contactIDs []models.RecordId) error {
+	if !propertyId.IsValid() {
+		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
+	}
+
+	if len(contactIDs) == 0 {
+		return server_error.New("PROPERTY_VALIDATION", "at least one contact is required")
+	}
+
+	// Convert RecordId slice to int slice
+	intContactIDs := make([]int, len(contactIDs))
+	for i, contactID := range contactIDs {
+		intContactIDs[i] = int(contactID)
+	}
+
+	// Clear existing contacts and set new ones
+	err := tx.Property.UpdateOneID(int(propertyId)).
+		ClearContacts().
+		AddContactIDs(intContactIDs...).
+		Exec(ctx)
+
+	if err != nil {
+		if client.IsNotFound(err) {
+			return server_error.New("PROPERTY_NOT_FOUND", "property not found")
+		}
+		rep.db.Logger().Error(fmt.Sprintf("Failed to update property contacts [%d]: %s", propertyId, err.Error()))
+		return server_error.Wrap("PROPERTY_UPDATE_CONTACTS", "failed to update property contacts", err)
+	}
+
+	rep.db.Logger().Info(fmt.Sprintf("Property contacts updated successfully: %d", propertyId))
+	return nil
+}
+
 func (rep *PropertyRepository) IncrementViewCount(ctx context.Context, propertyId models.RecordId) error {
 	if !propertyId.IsValid() {
 		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
@@ -507,8 +547,14 @@ func (rep *PropertyRepository) validatePropertyInput(propertyDTO *models.Propert
 	if propertyDTO.Municipality == nil || *propertyDTO.Municipality == "" {
 		return server_error.New("PROPERTY_VALIDATION", "municipality is required")
 	}
-	if propertyDTO.ContactID == nil || !propertyDTO.ContactID.IsValid() {
-		return server_error.New("PROPERTY_VALIDATION", "contact ID is required")
+	if len(propertyDTO.ContactIDs) == 0 {
+		return server_error.New("PROPERTY_VALIDATION", "at least one contact is required")
+	}
+	// Validate all contact IDs are valid
+	for _, contactID := range propertyDTO.ContactIDs {
+		if !contactID.IsValid() {
+			return server_error.New("PROPERTY_VALIDATION", "invalid contact ID provided")
+		}
 	}
 	if propertyDTO.PublisherID == nil || !propertyDTO.PublisherID.IsValid() {
 		return server_error.New("PROPERTY_VALIDATION", "publisher ID is required")
@@ -551,7 +597,6 @@ func (rep *PropertyRepository) validatePropertyInput(propertyDTO *models.Propert
 func (rep *PropertyRepository) entToDTO(prop *client.Property) *models.PropertyDTO {
 	recordId := models.RecordId(prop.ID)
 	publisherId := models.RecordId(prop.PublisherID)
-	contactId := models.RecordId(prop.ContactID)
 
 	propertyType := string(prop.PropertyType)
 	status := string(prop.Status)
@@ -569,11 +614,26 @@ func (rep *PropertyRepository) entToDTO(prop *client.Property) *models.PropertyD
 		District:     &prop.District,
 		Municipality: &prop.Municipality,
 		Country:      &country,
-		ContactID:    &contactId,
 		PublisherID:  &publisherId,
 		ViewCount:    &prop.ViewCount,
 		CreatedAt:    &prop.CreatedAt,
 		UpdatedAt:    &prop.UpdatedAt,
+	}
+
+	// Convert contacts from edges if loaded
+	if prop.Edges.Contacts != nil && len(prop.Edges.Contacts) > 0 {
+		contactIDs := make([]models.RecordId, len(prop.Edges.Contacts))
+		contacts := make([]models.ContactDTO, len(prop.Edges.Contacts))
+
+		contactRepo := NewContactRepository(rep.db)
+		for i, contact := range prop.Edges.Contacts {
+			contactIDs[i] = models.RecordId(contact.ID)
+			contactDTO := contactRepo.entToDTO(contact)
+			contacts[i] = *contactDTO
+		}
+
+		dto.ContactIDs = contactIDs
+		dto.Contacts = contacts
 	}
 
 	if prop.Parish != nil {

@@ -14,42 +14,42 @@ type ContactDTO struct {
 }
 
 type PropertyDTO struct {
-	ID             *RecordId   `json:"id"`
-	Title          *string     `json:"title"`
-	Description    *string     `json:"description"`
-	PropertyType   *string     `json:"propertyType"`
-	Price          *float64    `json:"price"`
-	Status         *string     `json:"status"`
-	IsPublished    *bool       `json:"isPublished"`
-	Address        *string     `json:"address"`
-	District       *string     `json:"district"`     // Distrito (required)
-	Municipality   *string     `json:"municipality"` // Concelho (required)
-	Parish         *string     `json:"parish"`       // Freguesia (optional)
-	PostalCode     *string     `json:"postalCode"`
-	Country        *string     `json:"country"`
-	Latitude       *float64    `json:"latitude"`
-	Longitude      *float64    `json:"longitude"`
-	Bedrooms       *int        `json:"bedrooms"`
-	Bathrooms      *int        `json:"bathrooms"`
-	AreaSqm        *float64    `json:"areaSqm"`
-	LandAreaSqm    *float64    `json:"landAreaSqm"`
-	YearBuilt      *int        `json:"yearBuilt"`
-	Floor          *int        `json:"floor"`
-	TotalFloors    *int        `json:"totalFloors"`
-	ParkingSpaces  *int        `json:"parkingSpaces"`
-	HasGarage      *bool       `json:"hasGarage"`
-	HasGarden      *bool       `json:"hasGarden"`
-	HasPool        *bool       `json:"hasPool"`
-	HasElevator    *bool       `json:"hasElevator"`
-	EnergyRating   *string     `json:"energyRating"`
-	VirtualTourURL *string     `json:"virtualTourUrl"`
-	ContactID      *RecordId   `json:"contactId"`
-	Contact        *ContactDTO `json:"contact,omitempty"`
-	PublisherID    *RecordId   `json:"publisherId"`
-	ViewCount      *int        `json:"viewCount"`
-	PublishedAt    *time.Time  `json:"publishedAt"`
-	CreatedAt      *time.Time  `json:"createdAt"`
-	UpdatedAt      *time.Time  `json:"updatedAt"`
+	ID             *RecordId    `json:"id"`
+	Title          *string      `json:"title"`
+	Description    *string      `json:"description"`
+	PropertyType   *string      `json:"propertyType"`
+	Price          *float64     `json:"price"`
+	Status         *string      `json:"status"`
+	IsPublished    *bool        `json:"isPublished"`
+	Address        *string      `json:"address"`
+	District       *string      `json:"district"`     // Distrito (required)
+	Municipality   *string      `json:"municipality"` // Concelho (required)
+	Parish         *string      `json:"parish"`       // Freguesia (optional)
+	PostalCode     *string      `json:"postalCode"`
+	Country        *string      `json:"country"`
+	Latitude       *float64     `json:"latitude"`
+	Longitude      *float64     `json:"longitude"`
+	Bedrooms       *int         `json:"bedrooms"`
+	Bathrooms      *int         `json:"bathrooms"`
+	AreaSqm        *float64     `json:"areaSqm"`
+	LandAreaSqm    *float64     `json:"landAreaSqm"`
+	YearBuilt      *int         `json:"yearBuilt"`
+	Floor          *int         `json:"floor"`
+	TotalFloors    *int         `json:"totalFloors"`
+	ParkingSpaces  *int         `json:"parkingSpaces"`
+	HasGarage      *bool        `json:"hasGarage"`
+	HasGarden      *bool        `json:"hasGarden"`
+	HasPool        *bool        `json:"hasPool"`
+	HasElevator    *bool        `json:"hasElevator"`
+	EnergyRating   *string      `json:"energyRating"`
+	VirtualTourURL *string      `json:"virtualTourUrl"`
+	ContactIDs     []RecordId   `json:"contactIds,omitempty"` // Array of contact IDs
+	Contacts       []ContactDTO `json:"contacts,omitempty"`   // Array of contact objects
+	PublisherID    *RecordId    `json:"publisherId"`
+	ViewCount      *int         `json:"viewCount"`
+	PublishedAt    *time.Time   `json:"publishedAt"`
+	CreatedAt      *time.Time   `json:"createdAt"`
+	UpdatedAt      *time.Time   `json:"updatedAt"`
 }
 
 type PropertyImageDTO struct {

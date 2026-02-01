@@ -27,7 +27,7 @@ type PropertyQuery struct {
 	inters        []Interceptor
 	predicates    []predicate.Property
 	withPublisher *UserQuery
-	withContact   *ContactQuery
+	withContacts  *ContactQuery
 	withImages    *PropertyImageQuery
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -87,8 +87,8 @@ func (_q *PropertyQuery) QueryPublisher() *UserQuery {
 	return query
 }
 
-// QueryContact chains the current query on the "contact" edge.
-func (_q *PropertyQuery) QueryContact() *ContactQuery {
+// QueryContacts chains the current query on the "contacts" edge.
+func (_q *PropertyQuery) QueryContacts() *ContactQuery {
 	query := (&ContactClient{config: _q.config}).Query()
 	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
 		if err := _q.prepareQuery(ctx); err != nil {
@@ -101,7 +101,7 @@ func (_q *PropertyQuery) QueryContact() *ContactQuery {
 		step := sqlgraph.NewStep(
 			sqlgraph.From(property.Table, property.FieldID, selector),
 			sqlgraph.To(contact.Table, contact.FieldID),
-			sqlgraph.Edge(sqlgraph.M2O, true, property.ContactTable, property.ContactColumn),
+			sqlgraph.Edge(sqlgraph.M2M, true, property.ContactsTable, property.ContactsPrimaryKey...),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -324,7 +324,7 @@ func (_q *PropertyQuery) Clone() *PropertyQuery {
 		inters:        append([]Interceptor{}, _q.inters...),
 		predicates:    append([]predicate.Property{}, _q.predicates...),
 		withPublisher: _q.withPublisher.Clone(),
-		withContact:   _q.withContact.Clone(),
+		withContacts:  _q.withContacts.Clone(),
 		withImages:    _q.withImages.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
@@ -343,14 +343,14 @@ func (_q *PropertyQuery) WithPublisher(opts ...func(*UserQuery)) *PropertyQuery 
 	return _q
 }
 
-// WithContact tells the query-builder to eager-load the nodes that are connected to
-// the "contact" edge. The optional arguments are used to configure the query builder of the edge.
-func (_q *PropertyQuery) WithContact(opts ...func(*ContactQuery)) *PropertyQuery {
+// WithContacts tells the query-builder to eager-load the nodes that are connected to
+// the "contacts" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *PropertyQuery) WithContacts(opts ...func(*ContactQuery)) *PropertyQuery {
 	query := (&ContactClient{config: _q.config}).Query()
 	for _, opt := range opts {
 		opt(query)
 	}
-	_q.withContact = query
+	_q.withContacts = query
 	return _q
 }
 
@@ -445,7 +445,7 @@ func (_q *PropertyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Pro
 		_spec       = _q.querySpec()
 		loadedTypes = [3]bool{
 			_q.withPublisher != nil,
-			_q.withContact != nil,
+			_q.withContacts != nil,
 			_q.withImages != nil,
 		}
 	)
@@ -473,9 +473,10 @@ func (_q *PropertyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Pro
 			return nil, err
 		}
 	}
-	if query := _q.withContact; query != nil {
-		if err := _q.loadContact(ctx, query, nodes, nil,
-			func(n *Property, e *Contact) { n.Edges.Contact = e }); err != nil {
+	if query := _q.withContacts; query != nil {
+		if err := _q.loadContacts(ctx, query, nodes,
+			func(n *Property) { n.Edges.Contacts = []*Contact{} },
+			func(n *Property, e *Contact) { n.Edges.Contacts = append(n.Edges.Contacts, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -518,31 +519,63 @@ func (_q *PropertyQuery) loadPublisher(ctx context.Context, query *UserQuery, no
 	}
 	return nil
 }
-func (_q *PropertyQuery) loadContact(ctx context.Context, query *ContactQuery, nodes []*Property, init func(*Property), assign func(*Property, *Contact)) error {
-	ids := make([]int, 0, len(nodes))
-	nodeids := make(map[int][]*Property)
-	for i := range nodes {
-		fk := nodes[i].ContactID
-		if _, ok := nodeids[fk]; !ok {
-			ids = append(ids, fk)
+func (_q *PropertyQuery) loadContacts(ctx context.Context, query *ContactQuery, nodes []*Property, init func(*Property), assign func(*Property, *Contact)) error {
+	edgeIDs := make([]driver.Value, len(nodes))
+	byID := make(map[int]*Property)
+	nids := make(map[int]map[*Property]struct{})
+	for i, node := range nodes {
+		edgeIDs[i] = node.ID
+		byID[node.ID] = node
+		if init != nil {
+			init(node)
 		}
-		nodeids[fk] = append(nodeids[fk], nodes[i])
 	}
-	if len(ids) == 0 {
-		return nil
+	query.Where(func(s *sql.Selector) {
+		joinT := sql.Table(property.ContactsTable)
+		s.Join(joinT).On(s.C(contact.FieldID), joinT.C(property.ContactsPrimaryKey[0]))
+		s.Where(sql.InValues(joinT.C(property.ContactsPrimaryKey[1]), edgeIDs...))
+		columns := s.SelectedColumns()
+		s.Select(joinT.C(property.ContactsPrimaryKey[1]))
+		s.AppendSelect(columns...)
+		s.SetDistinct(false)
+	})
+	if err := query.prepareQuery(ctx); err != nil {
+		return err
 	}
-	query.Where(contact.IDIn(ids...))
-	neighbors, err := query.All(ctx)
+	qr := QuerierFunc(func(ctx context.Context, q Query) (Value, error) {
+		return query.sqlAll(ctx, func(_ context.Context, spec *sqlgraph.QuerySpec) {
+			assign := spec.Assign
+			values := spec.ScanValues
+			spec.ScanValues = func(columns []string) ([]any, error) {
+				values, err := values(columns[1:])
+				if err != nil {
+					return nil, err
+				}
+				return append([]any{new(sql.NullInt64)}, values...), nil
+			}
+			spec.Assign = func(columns []string, values []any) error {
+				outValue := int(values[0].(*sql.NullInt64).Int64)
+				inValue := int(values[1].(*sql.NullInt64).Int64)
+				if nids[inValue] == nil {
+					nids[inValue] = map[*Property]struct{}{byID[outValue]: {}}
+					return assign(columns[1:], values[1:])
+				}
+				nids[inValue][byID[outValue]] = struct{}{}
+				return nil
+			}
+		})
+	})
+	neighbors, err := withInterceptors[[]*Contact](ctx, query, qr, query.inters)
 	if err != nil {
 		return err
 	}
 	for _, n := range neighbors {
-		nodes, ok := nodeids[n.ID]
+		nodes, ok := nids[n.ID]
 		if !ok {
-			return fmt.Errorf(`unexpected foreign-key "contact_id" returned %v`, n.ID)
+			return fmt.Errorf(`unexpected "contacts" node returned %v`, n.ID)
 		}
-		for i := range nodes {
-			assign(nodes[i], n)
+		for kn := range nodes {
+			assign(kn, n)
 		}
 	}
 	return nil
@@ -605,9 +638,6 @@ func (_q *PropertyQuery) querySpec() *sqlgraph.QuerySpec {
 		}
 		if _q.withPublisher != nil {
 			_spec.Node.AddColumnOnce(property.FieldPublisherID)
-		}
-		if _q.withContact != nil {
-			_spec.Node.AddColumnOnce(property.FieldContactID)
 		}
 	}
 	if ps := _q.predicates; len(ps) > 0 {

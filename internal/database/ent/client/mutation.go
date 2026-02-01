@@ -1694,8 +1694,9 @@ type PropertyMutation struct {
 	clearedFields     map[string]struct{}
 	publisher         *int
 	clearedpublisher  bool
-	contact           *int
-	clearedcontact    bool
+	contacts          map[int]struct{}
+	removedcontacts   map[int]struct{}
+	clearedcontacts   bool
 	images            map[int]struct{}
 	removedimages     map[int]struct{}
 	clearedimages     bool
@@ -3222,42 +3223,6 @@ func (m *PropertyMutation) ResetVirtualTourURL() {
 	delete(m.clearedFields, property.FieldVirtualTourURL)
 }
 
-// SetContactID sets the "contact_id" field.
-func (m *PropertyMutation) SetContactID(i int) {
-	m.contact = &i
-}
-
-// ContactID returns the value of the "contact_id" field in the mutation.
-func (m *PropertyMutation) ContactID() (r int, exists bool) {
-	v := m.contact
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldContactID returns the old "contact_id" field's value of the Property entity.
-// If the Property object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *PropertyMutation) OldContactID(ctx context.Context) (v int, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldContactID is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldContactID requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldContactID: %w", err)
-	}
-	return oldValue.ContactID, nil
-}
-
-// ResetContactID resets all changes to the "contact_id" field.
-func (m *PropertyMutation) ResetContactID() {
-	m.contact = nil
-}
-
 // SetPublisherID sets the "publisher_id" field.
 func (m *PropertyMutation) SetPublisherID(i int) {
 	m.publisher = &i
@@ -3498,31 +3463,58 @@ func (m *PropertyMutation) ResetPublisher() {
 	m.clearedpublisher = false
 }
 
-// ClearContact clears the "contact" edge to the Contact entity.
-func (m *PropertyMutation) ClearContact() {
-	m.clearedcontact = true
-	m.clearedFields[property.FieldContactID] = struct{}{}
+// AddContactIDs adds the "contacts" edge to the Contact entity by ids.
+func (m *PropertyMutation) AddContactIDs(ids ...int) {
+	if m.contacts == nil {
+		m.contacts = make(map[int]struct{})
+	}
+	for i := range ids {
+		m.contacts[ids[i]] = struct{}{}
+	}
 }
 
-// ContactCleared reports if the "contact" edge to the Contact entity was cleared.
-func (m *PropertyMutation) ContactCleared() bool {
-	return m.clearedcontact
+// ClearContacts clears the "contacts" edge to the Contact entity.
+func (m *PropertyMutation) ClearContacts() {
+	m.clearedcontacts = true
 }
 
-// ContactIDs returns the "contact" edge IDs in the mutation.
-// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
-// ContactID instead. It exists only for internal usage by the builders.
-func (m *PropertyMutation) ContactIDs() (ids []int) {
-	if id := m.contact; id != nil {
-		ids = append(ids, *id)
+// ContactsCleared reports if the "contacts" edge to the Contact entity was cleared.
+func (m *PropertyMutation) ContactsCleared() bool {
+	return m.clearedcontacts
+}
+
+// RemoveContactIDs removes the "contacts" edge to the Contact entity by IDs.
+func (m *PropertyMutation) RemoveContactIDs(ids ...int) {
+	if m.removedcontacts == nil {
+		m.removedcontacts = make(map[int]struct{})
+	}
+	for i := range ids {
+		delete(m.contacts, ids[i])
+		m.removedcontacts[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedContacts returns the removed IDs of the "contacts" edge to the Contact entity.
+func (m *PropertyMutation) RemovedContactsIDs() (ids []int) {
+	for id := range m.removedcontacts {
+		ids = append(ids, id)
 	}
 	return
 }
 
-// ResetContact resets all changes to the "contact" edge.
-func (m *PropertyMutation) ResetContact() {
-	m.contact = nil
-	m.clearedcontact = false
+// ContactsIDs returns the "contacts" edge IDs in the mutation.
+func (m *PropertyMutation) ContactsIDs() (ids []int) {
+	for id := range m.contacts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetContacts resets all changes to the "contacts" edge.
+func (m *PropertyMutation) ResetContacts() {
+	m.contacts = nil
+	m.clearedcontacts = false
+	m.removedcontacts = nil
 }
 
 // AddImageIDs adds the "images" edge to the PropertyImage entity by ids.
@@ -3613,7 +3605,7 @@ func (m *PropertyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PropertyMutation) Fields() []string {
-	fields := make([]string, 0, 34)
+	fields := make([]string, 0, 33)
 	if m.title != nil {
 		fields = append(fields, property.FieldTitle)
 	}
@@ -3698,9 +3690,6 @@ func (m *PropertyMutation) Fields() []string {
 	if m.virtual_tour_url != nil {
 		fields = append(fields, property.FieldVirtualTourURL)
 	}
-	if m.contact != nil {
-		fields = append(fields, property.FieldContactID)
-	}
 	if m.publisher != nil {
 		fields = append(fields, property.FieldPublisherID)
 	}
@@ -3780,8 +3769,6 @@ func (m *PropertyMutation) Field(name string) (ent.Value, bool) {
 		return m.EnergyRating()
 	case property.FieldVirtualTourURL:
 		return m.VirtualTourURL()
-	case property.FieldContactID:
-		return m.ContactID()
 	case property.FieldPublisherID:
 		return m.PublisherID()
 	case property.FieldViewCount:
@@ -3857,8 +3844,6 @@ func (m *PropertyMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldEnergyRating(ctx)
 	case property.FieldVirtualTourURL:
 		return m.OldVirtualTourURL(ctx)
-	case property.FieldContactID:
-		return m.OldContactID(ctx)
 	case property.FieldPublisherID:
 		return m.OldPublisherID(ctx)
 	case property.FieldViewCount:
@@ -4073,13 +4058,6 @@ func (m *PropertyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetVirtualTourURL(v)
-		return nil
-	case property.FieldContactID:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetContactID(v)
 		return nil
 	case property.FieldPublisherID:
 		v, ok := value.(int)
@@ -4489,9 +4467,6 @@ func (m *PropertyMutation) ResetField(name string) error {
 	case property.FieldVirtualTourURL:
 		m.ResetVirtualTourURL()
 		return nil
-	case property.FieldContactID:
-		m.ResetContactID()
-		return nil
 	case property.FieldPublisherID:
 		m.ResetPublisherID()
 		return nil
@@ -4517,8 +4492,8 @@ func (m *PropertyMutation) AddedEdges() []string {
 	if m.publisher != nil {
 		edges = append(edges, property.EdgePublisher)
 	}
-	if m.contact != nil {
-		edges = append(edges, property.EdgeContact)
+	if m.contacts != nil {
+		edges = append(edges, property.EdgeContacts)
 	}
 	if m.images != nil {
 		edges = append(edges, property.EdgeImages)
@@ -4534,10 +4509,12 @@ func (m *PropertyMutation) AddedIDs(name string) []ent.Value {
 		if id := m.publisher; id != nil {
 			return []ent.Value{*id}
 		}
-	case property.EdgeContact:
-		if id := m.contact; id != nil {
-			return []ent.Value{*id}
+	case property.EdgeContacts:
+		ids := make([]ent.Value, 0, len(m.contacts))
+		for id := range m.contacts {
+			ids = append(ids, id)
 		}
+		return ids
 	case property.EdgeImages:
 		ids := make([]ent.Value, 0, len(m.images))
 		for id := range m.images {
@@ -4551,6 +4528,9 @@ func (m *PropertyMutation) AddedIDs(name string) []ent.Value {
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *PropertyMutation) RemovedEdges() []string {
 	edges := make([]string, 0, 3)
+	if m.removedcontacts != nil {
+		edges = append(edges, property.EdgeContacts)
+	}
 	if m.removedimages != nil {
 		edges = append(edges, property.EdgeImages)
 	}
@@ -4561,6 +4541,12 @@ func (m *PropertyMutation) RemovedEdges() []string {
 // the given name in this mutation.
 func (m *PropertyMutation) RemovedIDs(name string) []ent.Value {
 	switch name {
+	case property.EdgeContacts:
+		ids := make([]ent.Value, 0, len(m.removedcontacts))
+		for id := range m.removedcontacts {
+			ids = append(ids, id)
+		}
+		return ids
 	case property.EdgeImages:
 		ids := make([]ent.Value, 0, len(m.removedimages))
 		for id := range m.removedimages {
@@ -4577,8 +4563,8 @@ func (m *PropertyMutation) ClearedEdges() []string {
 	if m.clearedpublisher {
 		edges = append(edges, property.EdgePublisher)
 	}
-	if m.clearedcontact {
-		edges = append(edges, property.EdgeContact)
+	if m.clearedcontacts {
+		edges = append(edges, property.EdgeContacts)
 	}
 	if m.clearedimages {
 		edges = append(edges, property.EdgeImages)
@@ -4592,8 +4578,8 @@ func (m *PropertyMutation) EdgeCleared(name string) bool {
 	switch name {
 	case property.EdgePublisher:
 		return m.clearedpublisher
-	case property.EdgeContact:
-		return m.clearedcontact
+	case property.EdgeContacts:
+		return m.clearedcontacts
 	case property.EdgeImages:
 		return m.clearedimages
 	}
@@ -4607,9 +4593,6 @@ func (m *PropertyMutation) ClearEdge(name string) error {
 	case property.EdgePublisher:
 		m.ClearPublisher()
 		return nil
-	case property.EdgeContact:
-		m.ClearContact()
-		return nil
 	}
 	return fmt.Errorf("unknown Property unique edge %s", name)
 }
@@ -4621,8 +4604,8 @@ func (m *PropertyMutation) ResetEdge(name string) error {
 	case property.EdgePublisher:
 		m.ResetPublisher()
 		return nil
-	case property.EdgeContact:
-		m.ResetContact()
+	case property.EdgeContacts:
+		m.ResetContacts()
 		return nil
 	case property.EdgeImages:
 		m.ResetImages()

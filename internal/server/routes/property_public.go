@@ -34,12 +34,7 @@ func GetProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	if property.ContactID != nil {
-		contact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), *property.ContactID)
-		if err == nil {
-			property.Contact = contact
-		}
-	}
+	// Contacts are now automatically loaded via WithContacts() in GetPropertyById
 
 	err = ctx.Db().NewPropertyRepository().IncrementViewCount(context.Background(), propertyId)
 	if err != nil {
@@ -106,14 +101,7 @@ func ListProperties(ctx *RouteContext) error {
 		return err
 	}
 
-	for i := range properties {
-		if properties[i].ContactID != nil {
-			contact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), *properties[i].ContactID)
-			if err == nil {
-				properties[i].Contact = contact
-			}
-		}
-	}
+	// Contacts are now automatically loaded via WithContacts() in ListProperties
 
 	return ctx.RespondData(&PropertyListResponse{
 		Properties: properties,

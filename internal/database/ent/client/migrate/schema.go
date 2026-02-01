@@ -127,7 +127,6 @@ var (
 		{Name: "published_at", Type: field.TypeTime, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
-		{Name: "contact_id", Type: field.TypeInt},
 		{Name: "publisher_id", Type: field.TypeInt},
 	}
 	// PropertiesTable holds the schema information for the "properties" table.
@@ -137,14 +136,8 @@ var (
 		PrimaryKey: []*schema.Column{PropertiesColumns[0]},
 		ForeignKeys: []*schema.ForeignKey{
 			{
-				Symbol:     "properties_contacts_properties",
-				Columns:    []*schema.Column{PropertiesColumns[33]},
-				RefColumns: []*schema.Column{ContactsColumns[0]},
-				OnDelete:   schema.NoAction,
-			},
-			{
 				Symbol:     "properties_users_properties",
-				Columns:    []*schema.Column{PropertiesColumns[34]},
+				Columns:    []*schema.Column{PropertiesColumns[33]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -153,7 +146,7 @@ var (
 			{
 				Name:    "property_publisher_id",
 				Unique:  false,
-				Columns: []*schema.Column{PropertiesColumns[34]},
+				Columns: []*schema.Column{PropertiesColumns[33]},
 			},
 			{
 				Name:    "property_district_status_is_published",
@@ -340,6 +333,31 @@ var (
 			},
 		},
 	}
+	// ContactPropertiesColumns holds the columns for the "contact_properties" table.
+	ContactPropertiesColumns = []*schema.Column{
+		{Name: "contact_id", Type: field.TypeInt},
+		{Name: "property_id", Type: field.TypeInt},
+	}
+	// ContactPropertiesTable holds the schema information for the "contact_properties" table.
+	ContactPropertiesTable = &schema.Table{
+		Name:       "contact_properties",
+		Columns:    ContactPropertiesColumns,
+		PrimaryKey: []*schema.Column{ContactPropertiesColumns[0], ContactPropertiesColumns[1]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "contact_properties_contact_id",
+				Columns:    []*schema.Column{ContactPropertiesColumns[0]},
+				RefColumns: []*schema.Column{ContactsColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+			{
+				Symbol:     "contact_properties_property_id",
+				Columns:    []*schema.Column{ContactPropertiesColumns[1]},
+				RefColumns: []*schema.Column{PropertiesColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		AuthLogsTable,
@@ -350,15 +368,17 @@ var (
 		SessionsTable,
 		UsersTable,
 		UserAuthsTable,
+		ContactPropertiesTable,
 	}
 )
 
 func init() {
 	AuthLogsTable.ForeignKeys[0].RefTable = UsersTable
 	ContactsTable.ForeignKeys[0].RefTable = UsersTable
-	PropertiesTable.ForeignKeys[0].RefTable = ContactsTable
-	PropertiesTable.ForeignKeys[1].RefTable = UsersTable
+	PropertiesTable.ForeignKeys[0].RefTable = UsersTable
 	PropertyImagesTable.ForeignKeys[0].RefTable = PropertiesTable
 	SessionsTable.ForeignKeys[0].RefTable = UsersTable
 	UserAuthsTable.ForeignKeys[0].RefTable = UsersTable
+	ContactPropertiesTable.ForeignKeys[0].RefTable = ContactsTable
+	ContactPropertiesTable.ForeignKeys[1].RefTable = PropertiesTable
 }

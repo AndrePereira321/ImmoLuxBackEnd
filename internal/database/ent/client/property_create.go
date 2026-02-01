@@ -367,12 +367,6 @@ func (_c *PropertyCreate) SetNillableVirtualTourURL(v *string) *PropertyCreate {
 	return _c
 }
 
-// SetContactID sets the "contact_id" field.
-func (_c *PropertyCreate) SetContactID(v int) *PropertyCreate {
-	_c.mutation.SetContactID(v)
-	return _c
-}
-
 // SetPublisherID sets the "publisher_id" field.
 func (_c *PropertyCreate) SetPublisherID(v int) *PropertyCreate {
 	_c.mutation.SetPublisherID(v)
@@ -440,9 +434,19 @@ func (_c *PropertyCreate) SetPublisher(v *User) *PropertyCreate {
 	return _c.SetPublisherID(v.ID)
 }
 
-// SetContact sets the "contact" edge to the Contact entity.
-func (_c *PropertyCreate) SetContact(v *Contact) *PropertyCreate {
-	return _c.SetContactID(v.ID)
+// AddContactIDs adds the "contacts" edge to the Contact entity by IDs.
+func (_c *PropertyCreate) AddContactIDs(ids ...int) *PropertyCreate {
+	_c.mutation.AddContactIDs(ids...)
+	return _c
+}
+
+// AddContacts adds the "contacts" edges to the Contact entity.
+func (_c *PropertyCreate) AddContacts(v ...*Contact) *PropertyCreate {
+	ids := make([]int, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddContactIDs(ids...)
 }
 
 // AddImageIDs adds the "images" edge to the PropertyImage entity by IDs.
@@ -675,14 +679,6 @@ func (_c *PropertyCreate) check() error {
 			return &ValidationError{Name: "virtual_tour_url", err: fmt.Errorf(`client: validator failed for field "Property.virtual_tour_url": %w`, err)}
 		}
 	}
-	if _, ok := _c.mutation.ContactID(); !ok {
-		return &ValidationError{Name: "contact_id", err: errors.New(`client: missing required field "Property.contact_id"`)}
-	}
-	if v, ok := _c.mutation.ContactID(); ok {
-		if err := property.ContactIDValidator(v); err != nil {
-			return &ValidationError{Name: "contact_id", err: fmt.Errorf(`client: validator failed for field "Property.contact_id": %w`, err)}
-		}
-	}
 	if _, ok := _c.mutation.PublisherID(); !ok {
 		return &ValidationError{Name: "publisher_id", err: errors.New(`client: missing required field "Property.publisher_id"`)}
 	}
@@ -707,9 +703,6 @@ func (_c *PropertyCreate) check() error {
 	}
 	if len(_c.mutation.PublisherIDs()) == 0 {
 		return &ValidationError{Name: "publisher", err: errors.New(`client: missing required edge "Property.publisher"`)}
-	}
-	if len(_c.mutation.ContactIDs()) == 0 {
-		return &ValidationError{Name: "contact", err: errors.New(`client: missing required edge "Property.contact"`)}
 	}
 	return nil
 }
@@ -882,12 +875,12 @@ func (_c *PropertyCreate) createSpec() (*Property, *sqlgraph.CreateSpec) {
 		_node.PublisherID = nodes[0]
 		_spec.Edges = append(_spec.Edges, edge)
 	}
-	if nodes := _c.mutation.ContactIDs(); len(nodes) > 0 {
+	if nodes := _c.mutation.ContactsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
+			Rel:     sqlgraph.M2M,
 			Inverse: true,
-			Table:   property.ContactTable,
-			Columns: []string{property.ContactColumn},
+			Table:   property.ContactsTable,
+			Columns: property.ContactsPrimaryKey,
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(contact.FieldID, field.TypeInt),
@@ -896,7 +889,6 @@ func (_c *PropertyCreate) createSpec() (*Property, *sqlgraph.CreateSpec) {
 		for _, k := range nodes {
 			edge.Target.Nodes = append(edge.Target.Nodes, k)
 		}
-		_node.ContactID = nodes[0]
 		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.ImagesIDs(); len(nodes) > 0 {

@@ -71,8 +71,6 @@ const (
 	FieldEnergyRating = "energy_rating"
 	// FieldVirtualTourURL holds the string denoting the virtual_tour_url field in the database.
 	FieldVirtualTourURL = "virtual_tour_url"
-	// FieldContactID holds the string denoting the contact_id field in the database.
-	FieldContactID = "contact_id"
 	// FieldPublisherID holds the string denoting the publisher_id field in the database.
 	FieldPublisherID = "publisher_id"
 	// FieldViewCount holds the string denoting the view_count field in the database.
@@ -85,8 +83,8 @@ const (
 	FieldUpdatedAt = "updated_at"
 	// EdgePublisher holds the string denoting the publisher edge name in mutations.
 	EdgePublisher = "publisher"
-	// EdgeContact holds the string denoting the contact edge name in mutations.
-	EdgeContact = "contact"
+	// EdgeContacts holds the string denoting the contacts edge name in mutations.
+	EdgeContacts = "contacts"
 	// EdgeImages holds the string denoting the images edge name in mutations.
 	EdgeImages = "images"
 	// Table holds the table name of the property in the database.
@@ -98,13 +96,11 @@ const (
 	PublisherInverseTable = "users"
 	// PublisherColumn is the table column denoting the publisher relation/edge.
 	PublisherColumn = "publisher_id"
-	// ContactTable is the table that holds the contact relation/edge.
-	ContactTable = "properties"
-	// ContactInverseTable is the table name for the Contact entity.
+	// ContactsTable is the table that holds the contacts relation/edge. The primary key declared below.
+	ContactsTable = "contact_properties"
+	// ContactsInverseTable is the table name for the Contact entity.
 	// It exists in this package in order to avoid circular dependency with the "contact" package.
-	ContactInverseTable = "contacts"
-	// ContactColumn is the table column denoting the contact relation/edge.
-	ContactColumn = "contact_id"
+	ContactsInverseTable = "contacts"
 	// ImagesTable is the table that holds the images relation/edge.
 	ImagesTable = "property_images"
 	// ImagesInverseTable is the table name for the PropertyImage entity.
@@ -145,13 +141,18 @@ var Columns = []string{
 	FieldHasElevator,
 	FieldEnergyRating,
 	FieldVirtualTourURL,
-	FieldContactID,
 	FieldPublisherID,
 	FieldViewCount,
 	FieldPublishedAt,
 	FieldCreatedAt,
 	FieldUpdatedAt,
 }
+
+var (
+	// ContactsPrimaryKey and ContactsColumn2 are the table columns denoting the
+	// primary key for the contacts relation (M2M).
+	ContactsPrimaryKey = []string{"contact_id", "property_id"}
+)
 
 // ValidColumn reports if the column name is valid (part of the table columns).
 func ValidColumn(column string) bool {
@@ -206,8 +207,6 @@ var (
 	DefaultHasElevator bool
 	// VirtualTourURLValidator is a validator for the "virtual_tour_url" field. It is called by the builders before save.
 	VirtualTourURLValidator func(string) error
-	// ContactIDValidator is a validator for the "contact_id" field. It is called by the builders before save.
-	ContactIDValidator func(int) error
 	// PublisherIDValidator is a validator for the "publisher_id" field. It is called by the builders before save.
 	PublisherIDValidator func(int) error
 	// DefaultViewCount holds the default value on creation for the "view_count" field.
@@ -457,11 +456,6 @@ func ByVirtualTourURL(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldVirtualTourURL, opts...).ToFunc()
 }
 
-// ByContactID orders the results by the contact_id field.
-func ByContactID(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldContactID, opts...).ToFunc()
-}
-
 // ByPublisherID orders the results by the publisher_id field.
 func ByPublisherID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPublisherID, opts...).ToFunc()
@@ -494,10 +488,17 @@ func ByPublisherField(field string, opts ...sql.OrderTermOption) OrderOption {
 	}
 }
 
-// ByContactField orders the results by contact field.
-func ByContactField(field string, opts ...sql.OrderTermOption) OrderOption {
+// ByContactsCount orders the results by contacts count.
+func ByContactsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
-		sqlgraph.OrderByNeighborTerms(s, newContactStep(), sql.OrderByField(field, opts...))
+		sqlgraph.OrderByNeighborsCount(s, newContactsStep(), opts...)
+	}
+}
+
+// ByContacts orders the results by contacts terms.
+func ByContacts(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newContactsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
 
@@ -521,11 +522,11 @@ func newPublisherStep() *sqlgraph.Step {
 		sqlgraph.Edge(sqlgraph.M2O, true, PublisherTable, PublisherColumn),
 	)
 }
-func newContactStep() *sqlgraph.Step {
+func newContactsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
-		sqlgraph.To(ContactInverseTable, FieldID),
-		sqlgraph.Edge(sqlgraph.M2O, true, ContactTable, ContactColumn),
+		sqlgraph.To(ContactsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2M, true, ContactsTable, ContactsPrimaryKey...),
 	)
 }
 func newImagesStep() *sqlgraph.Step {
