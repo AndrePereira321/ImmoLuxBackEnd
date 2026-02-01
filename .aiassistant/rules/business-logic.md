@@ -956,16 +956,29 @@ Cache-Control: public, max-age=31536000
 **Query Parameters**: Same as public list, including:
 - `limit` - Results per page (default: 20)
 - `offset` - Pagination offset (default: 0)
-- `orderBy` - Sort order (same options as public list)
+- `orderBy` - Sort order (same options as public list, plus `status`)
+
+**Default Sorting**: Properties are **automatically sorted by status** (available → pending → sold → rented) unless `orderBy` is explicitly specified.
 
 **Response**: Same structure as public list
+
+**Sorting Options**:
+- `status` - Status priority: Available → Pending → Sold → Rented (DEFAULT for /my-properties)
+- `price_asc` - Price: Low to High
+- `price_desc` - Price: High to Low
+- `created_asc` - Oldest First
+- `created_desc` - Newest First
+- `popularity` - Most Viewed First
+- `location` - Alphabetically by District → Municipality → Parish
 
 **Notes**:
 
 - Returns ALL user properties (published AND unpublished)
 - Contact information included for each property
 - Only shows properties where `publisher_id` matches authenticated user
-- Supports all sorting options (price_asc, price_desc, created_asc, created_desc, popularity, location)
+- **Default behavior**: Orders by status (available, pending, sold, rented) with newest first within each status group
+- User can override default sorting by providing explicit `orderBy` parameter
+- Supports all sorting options (price_asc, price_desc, created_asc, created_desc, popularity, location, status)
 
 ##### POST /properties
 

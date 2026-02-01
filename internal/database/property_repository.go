@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"immo-lux/internal/database/ent/client"
@@ -32,7 +33,7 @@ type PropertyFilters struct {
 	PublisherID  *models.RecordId
 	Limit        int
 	Offset       int
-	OrderBy      *string // Options: "price_asc", "price_desc", "created_asc", "created_desc", "popularity", "location"
+	OrderBy      *string // Options: "price_asc", "price_desc", "created_asc", "created_desc", "popularity", "location", "status"
 }
 
 func (rep *PropertyRepository) CreateProperty(ctx context.Context, tx *client.Tx, propertyDTO *models.PropertyDTO) (models.RecordId, error) {
@@ -316,11 +317,73 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 	}
 
 	// Apply ordering
-	orderBy := "created_desc" // default
+	// Default to status ordering for user properties, otherwise newest first
+	orderBy := "created_desc" // default for public listings
+	if filters.PublisherID != nil {
+		// For user's own properties (my-properties endpoint), default to status ordering
+		orderBy = "status"
+	}
 	if filters.OrderBy != nil {
+		// Allow explicit orderBy to override default
 		orderBy = *filters.OrderBy
 	}
 
+	// For status ordering, we need to fetch all results and sort in-memory
+	if orderBy == "status" {
+		// Fetch all matching properties without limit/offset
+		allProperties, err := query.All(ctx)
+		if err != nil {
+			return nil, 0, server_error.Wrap("PROPERTY_LIST", "failed to list properties", err)
+		}
+
+		// Sort by status priority: available (1) -> pending (2) -> sold (3) -> rented (4)
+		sort.Slice(allProperties, func(i, j int) bool {
+			statusPriority := func(s property.Status) int {
+				switch s {
+				case property.StatusAvailable:
+					return 1
+				case property.StatusPending:
+					return 2
+				case property.StatusSold:
+					return 3
+				case property.StatusRented:
+					return 4
+				default:
+					return 5
+				}
+			}
+
+			priorityI := statusPriority(allProperties[i].Status)
+			priorityJ := statusPriority(allProperties[j].Status)
+
+			if priorityI != priorityJ {
+				return priorityI < priorityJ
+			}
+
+			// Secondary sort by created_at DESC (newest first)
+			return allProperties[i].CreatedAt.After(allProperties[j].CreatedAt)
+		})
+
+		// Apply pagination manually
+		start := filters.Offset
+		end := filters.Offset + filters.Limit
+		if start > len(allProperties) {
+			start = len(allProperties)
+		}
+		if end > len(allProperties) {
+			end = len(allProperties)
+		}
+
+		pagedProperties := allProperties[start:end]
+		dtos := make([]models.PropertyDTO, len(pagedProperties))
+		for i, prop := range pagedProperties {
+			dtos[i] = *rep.entToDTO(prop)
+		}
+
+		return dtos, total, nil
+	}
+
+	// Standard ordering using database
 	switch orderBy {
 	case "price_asc":
 		query = query.Order(client.Asc(property.FieldPrice))
