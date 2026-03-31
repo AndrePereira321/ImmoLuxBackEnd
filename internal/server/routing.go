@@ -2,10 +2,6 @@ package server
 
 import (
 	"immo-lux/internal/server/routes"
-	"path/filepath"
-	"strings"
-
-	"github.com/gofiber/fiber/v3"
 )
 
 type RouteHandler func(ctx *routes.RouteContext) error
@@ -41,67 +37,4 @@ func (s *Server) RegisterRoutes() {
 	s.SecuredGet("/contacts/:id", routes.GetContact)
 	s.SecuredPut("/contacts/:id", routes.UpdateContact)
 	s.SecuredDelete("/contacts/:id", routes.DeleteContact)
-
-	s.serveSPA()
-}
-
-func (s *Server) serveSPA() {
-	spaFolder := s.config.HttpServer().SpaFolder()
-	if spaFolder == "" {
-		return
-	}
-
-	mfs, err := newMemoryFS(spaFolder)
-	if err != nil {
-		panic("Failed to load SPA files into memory: " + err.Error())
-	}
-
-	s.fiber.Use(func(c fiber.Ctx) error {
-		if strings.HasPrefix(c.Path(), ApiPrefix) {
-			return c.Next()
-		}
-
-		path := c.Path()
-		acceptEncoding := c.Get("Accept-Encoding")
-
-		if tryServeFile(c, mfs, path, acceptEncoding) {
-			return nil
-		}
-
-		if tryServeFile(c, mfs, "/index.html", acceptEncoding) {
-			return nil
-		}
-
-		return c.Status(404).SendString("Not found")
-	})
-}
-
-func tryServeFile(c fiber.Ctx, mfs *memoryFS, path string, acceptEncoding string) bool {
-	ext := filepath.Ext(path)
-
-	if strings.Contains(acceptEncoding, "br") && tryServeWithEncoding(c, mfs, path+".br", ext, "br") {
-		return true
-	}
-
-	if strings.Contains(acceptEncoding, "gzip") && tryServeWithEncoding(c, mfs, path+".gz", ext, "gzip") {
-		return true
-	}
-
-	return tryServeWithEncoding(c, mfs, path, ext, "")
-}
-
-func tryServeWithEncoding(c fiber.Ctx, mfs *memoryFS, path string, ext string, encoding string) bool {
-	data, err := mfs.Open(path)
-	if err != nil {
-		return false
-	}
-
-	if encoding != "" {
-		c.Set("Content-Encoding", encoding)
-	}
-	if ext != "" {
-		c.Type(ext[1:])
-	}
-	c.Send(data)
-	return true
 }

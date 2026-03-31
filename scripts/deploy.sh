@@ -27,6 +27,7 @@ PROJECT_ROOT="/opt/immolux"
 BACKEND_DIR="$PROJECT_ROOT/backend"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 SERVICE_NAME="immolux"
+FRONTEND_SERVICE_NAME="immolux-frontend"
 SKIP_RESTART=false
 
 # Parse arguments
@@ -116,13 +117,20 @@ echo ""
 ################################################################################
 
 if [ "$SKIP_RESTART" = false ]; then
-    log_info "Stopping $SERVICE_NAME service..."
+    log_info "Stopping services..."
+
+    if systemctl is-active --quiet $FRONTEND_SERVICE_NAME; then
+        sudo systemctl stop $FRONTEND_SERVICE_NAME
+        log_success "Frontend service stopped"
+    else
+        log_warning "Frontend service was not running"
+    fi
 
     if systemctl is-active --quiet $SERVICE_NAME; then
         sudo systemctl stop $SERVICE_NAME
-        log_success "Service stopped"
+        log_success "Backend service stopped"
     else
-        log_warning "Service was not running"
+        log_warning "Backend service was not running"
     fi
     echo ""
 fi
@@ -262,19 +270,11 @@ else
     exit 1
 fi
 
-# Check frontend build
-if [ -d "$FRONTEND_DIR/build" ]; then
-    log_success "Frontend build exists: $FRONTEND_DIR/build"
-
-    # Check for index.html
-    if [ -f "$FRONTEND_DIR/build/index.html" ]; then
-        log_success "Frontend index.html found"
-    else
-        log_error "Frontend index.html not found!"
-        exit 1
-    fi
+# Check frontend build (adapter-node entry point)
+if [ -f "$FRONTEND_DIR/build/index.js" ]; then
+    log_success "Frontend build exists: $FRONTEND_DIR/build/index.js"
 else
-    log_error "Frontend build directory not found!"
+    log_error "Frontend build/index.js not found!"
     exit 1
 fi
 echo ""
@@ -285,31 +285,38 @@ echo ""
 
 if [ "$SKIP_RESTART" = false ]; then
     log_info "========================================="
-    log_info "  RESTARTING SERVICE"
+    log_info "  RESTARTING SERVICES"
     log_info "========================================="
     echo ""
 
-    log_info "Starting $SERVICE_NAME service..."
+    log_info "Starting backend service..."
     sudo systemctl start $SERVICE_NAME
-
-    # Wait a moment for service to start
     sleep 2
-
-    # Check if service started successfully
     if systemctl is-active --quiet $SERVICE_NAME; then
-        log_success "Service started successfully"
-
-        # Show service status
-        sudo systemctl status $SERVICE_NAME --no-pager -l
+        log_success "Backend service started"
     else
-        log_error "Service failed to start!"
+        log_error "Backend service failed to start!"
         log_error "Check logs with: sudo journalctl -u $SERVICE_NAME -n 50"
+        exit 1
+    fi
+
+    log_info "Starting frontend service..."
+    sudo systemctl start $FRONTEND_SERVICE_NAME
+    sleep 2
+    if systemctl is-active --quiet $FRONTEND_SERVICE_NAME; then
+        log_success "Frontend service started"
+        sudo systemctl status $FRONTEND_SERVICE_NAME --no-pager -l
+    else
+        log_error "Frontend service failed to start!"
+        log_error "Check logs with: sudo journalctl -u $FRONTEND_SERVICE_NAME -n 50"
         exit 1
     fi
     echo ""
 else
     log_warning "Skipping service restart (--skip-restart flag)"
-    log_info "To start manually: sudo systemctl start $SERVICE_NAME"
+    log_info "To start manually:"
+    log_info "  sudo systemctl start $SERVICE_NAME"
+    log_info "  sudo systemctl start $FRONTEND_SERVICE_NAME"
     echo ""
 fi
 
@@ -336,10 +343,11 @@ log_info "Frontend: $FRONTEND_COMMIT - $FRONTEND_MSG"
 echo ""
 
 log_info "Useful commands:"
-log_info "  View logs:        tail -f $BACKEND_DIR/logs/SERVER.log"
-log_info "  Service status:   sudo systemctl status $SERVICE_NAME"
-log_info "  Restart service:  sudo systemctl restart $SERVICE_NAME"
-log_info "  Stop service:     sudo systemctl stop $SERVICE_NAME"
+log_info "  Backend logs:     tail -f $BACKEND_DIR/logs/SERVER.log"
+log_info "  Frontend logs:    tail -f /opt/immolux/logs/frontend.log"
+log_info "  Backend status:   sudo systemctl status $SERVICE_NAME"
+log_info "  Frontend status:  sudo systemctl status $FRONTEND_SERVICE_NAME"
+log_info "  Restart all:      sudo systemctl restart $SERVICE_NAME $FRONTEND_SERVICE_NAME"
 echo ""
 
 log_success "Deployment completed at $(date)"

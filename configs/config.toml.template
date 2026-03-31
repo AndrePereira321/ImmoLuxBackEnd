@@ -6,8 +6,7 @@ version="1.0.0-alpha"
 host = "localhost"
 port = 8080
 enable_pre_fork = false
-origin="http://localhost:8080/"
-spaFolder = "./build"
+origin="https://immolux.pt"
 
 [logging]
 server_log_level="TRACE"
