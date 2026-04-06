@@ -25,6 +25,8 @@ type LocationValidator struct {
 	districtsList      []string
 	municipalitiesList []string
 	parishesList       []string
+	slugToDistrict     map[string]string
+	slugToMunicipality map[string]string
 	postalCodeRe       *regexp.Regexp
 }
 
@@ -37,10 +39,12 @@ func GetLocationValidator() (*LocationValidator, error) {
 	var initErr error
 	validatorOnce.Do(func() {
 		locationValidator = &LocationValidator{
-			districts:      make(map[string]bool),
-			municipalities: make(map[string]bool),
-			parishes:       make(map[string]bool),
-			postalCodeRe:   regexp.MustCompile(`^\d{4}-\d{3}$`),
+			districts:          make(map[string]bool),
+			municipalities:     make(map[string]bool),
+			parishes:           make(map[string]bool),
+			slugToDistrict:     make(map[string]string),
+			slugToMunicipality: make(map[string]string),
+			postalCodeRe:       regexp.MustCompile(`^\d{4}-\d{3}$`),
 		}
 		initErr = locationValidator.loadData()
 	})
@@ -69,12 +73,14 @@ func (lv *LocationValidator) loadData() error {
 			if !districtSet[div.Name] {
 				districtSet[div.Name] = true
 				lv.districtsList = append(lv.districtsList, div.Name)
+				lv.slugToDistrict[Slugify(div.Name)] = div.Name
 			}
 		case 2:
 			lv.municipalities[normalizedName] = true
 			if !municipalitySet[div.Name] {
 				municipalitySet[div.Name] = true
 				lv.municipalitiesList = append(lv.municipalitiesList, div.Name)
+				lv.slugToMunicipality[Slugify(div.Name)] = div.Name
 			}
 		case 3:
 			lv.parishes[normalizedName] = true
@@ -170,4 +176,18 @@ func (lv *LocationValidator) GetCities() []string {
 	}
 
 	return cities
+}
+
+// SlugToDistrict resolves a URL slug (e.g. "viana-do-castelo") to the
+// canonical district name (e.g. "Viana do Castelo"). Returns false if not found.
+func (lv *LocationValidator) SlugToDistrict(slug string) (string, bool) {
+	name, ok := lv.slugToDistrict[slug]
+	return name, ok
+}
+
+// SlugToMunicipality resolves a URL slug (e.g. "sintra") to the canonical
+// municipality name (e.g. "Sintra"). Returns false if not found.
+func (lv *LocationValidator) SlugToMunicipality(slug string) (string, bool) {
+	name, ok := lv.slugToMunicipality[slug]
+	return name, ok
 }

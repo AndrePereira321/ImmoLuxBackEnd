@@ -73,3 +73,44 @@ func TestLocationValidator(t *testing.T) {
 	t.Logf("Loaded: %d districts, %d municipalities, %d parishes",
 		stats["districts"], stats["municipalities"], stats["parishes"])
 }
+
+func TestLocationValidatorSlugs(t *testing.T) {
+	validator, err := GetLocationValidator()
+	if err != nil {
+		t.Fatalf("Failed to initialize validator: %v", err)
+	}
+
+	name, ok := validator.SlugToDistrict("lisboa")
+	if !ok {
+		t.Fatal("Expected slug 'lisboa' to resolve")
+	}
+	if name != "Lisboa" {
+		t.Errorf("SlugToDistrict('lisboa') = %q; want 'Lisboa'", name)
+	}
+
+	name, ok = validator.SlugToDistrict("viana-do-castelo")
+	if !ok {
+		t.Fatal("Expected slug 'viana-do-castelo' to resolve")
+	}
+	if name != "Viana do Castelo" {
+		t.Errorf("SlugToDistrict('viana-do-castelo') = %q; want 'Viana do Castelo'", name)
+	}
+
+	name, ok = validator.SlugToMunicipality("sintra")
+	if !ok {
+		t.Fatal("Expected slug 'sintra' to resolve")
+	}
+	if name != "Sintra" {
+		t.Errorf("SlugToMunicipality('sintra') = %q; want 'Sintra'", name)
+	}
+
+	_, ok = validator.SlugToDistrict("unknown-place")
+	if ok {
+		t.Error("Expected unknown slug to not resolve")
+	}
+
+	_, ok = validator.SlugToMunicipality("invalid-place")
+	if ok {
+		t.Error("Expected unknown municipality slug to not resolve")
+	}
+}
