@@ -67,3 +67,30 @@ type PropertyWithImagesDTO struct {
 	Property *PropertyDTO       `json:"property"`
 	Images   []PropertyImageDTO `json:"images"`
 }
+
+// LocationStatsDTO is returned by GET /v1/api/locations/stats
+type LocationStatsDTO struct {
+	District       string  `json:"district"`             // Canonical district name, e.g. "Lisboa"
+	Municipality   *string `json:"municipality"`          // Canonical municipality name, nil for district-level
+	Total          int     `json:"total"`
+	MinPrice       float64 `json:"minPrice"`
+	MaxPrice       float64 `json:"maxPrice"`
+	AvgPrice       float64 `json:"avgPrice"`
+	MostCommonType string  `json:"mostCommonType"`
+}
+
+// PublishedLocationDTO is one entry in the published-locations response.
+// District and DistrictSlug are only set for municipality entries.
+type PublishedLocationDTO struct {
+	Name         string    `json:"name"`
+	Slug         string    `json:"slug"`
+	District     string    `json:"district,omitempty"`     // Set only for municipalities
+	DistrictSlug string    `json:"districtSlug,omitempty"` // Set only for municipalities
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+// PublishedLocationsDTO is returned by GET /v1/api/locations/published
+type PublishedLocationsDTO struct {
+	Districts      []PublishedLocationDTO `json:"districts"`
+	Municipalities []PublishedLocationDTO `json:"municipalities"`
+}
