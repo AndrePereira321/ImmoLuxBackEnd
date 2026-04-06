@@ -16,6 +16,8 @@ func (s *Server) RegisterRoutes() {
 	s.SecuredPost("/sessions/revoke", routes.RevokeSession)
 
 	s.Get("/locations", routes.GetLocations)
+	s.Get("/locations/stats", routes.GetLocationStats)
+	s.Get("/locations/published", routes.GetPublishedLocations)
 
 	s.Get("/properties", routes.ListProperties)
 	s.Get("/properties/:id", routes.GetProperty)
