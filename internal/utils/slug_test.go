@@ -16,6 +16,10 @@ func TestSlugify(t *testing.T) {
 		{"Castelo Branco", "castelo-branco"},
 		{"Coimbra", "coimbra"},
 		{"Figueira da Foz", "figueira-da-foz"},
+		{"", ""},
+		{"porto", "porto"},
+		{" Lisboa ", "lisboa"},
+		{"Vila  Real", "vila-real"},
 	}
 	for _, c := range cases {
 		result := Slugify(c.input)

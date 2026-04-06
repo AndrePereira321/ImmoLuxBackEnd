@@ -27,6 +27,9 @@ var slugMultiHyphenRe = regexp.MustCompile(`-{2,}`)
 // "Viana do Castelo" → "viana-do-castelo"
 // "São Brás de Alportel" → "sao-bras-de-alportel"
 func Slugify(name string) string {
+	if name == "" {
+		return ""
+	}
 	s := strings.ToLower(name)
 	s = slugAccentReplacer.Replace(s)
 	s = strings.ReplaceAll(s, " ", "-")
