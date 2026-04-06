@@ -3,7 +3,6 @@ package routes
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"immo-lux/internal/database/ent/client"
 	"immo-lux/internal/models"
@@ -32,9 +31,9 @@ func CreateContact(ctx *RouteContext) error {
 		return err
 	}
 
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	contactDTO := &models.ContactDTO{
@@ -46,15 +45,14 @@ func CreateContact(ctx *RouteContext) error {
 	}
 
 	var contactId models.RecordId
-	err := ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		id, err := ctx.Db().NewContactRepository().CreateContact(txCtx, tx, contactDTO)
-		if err != nil {
-			return err
+	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
+		id, createErr := ctx.Db().NewContactRepository().CreateContact(txCtx, tx, contactDTO)
+		if createErr != nil {
+			return createErr
 		}
 		contactId = id
 		return nil
 	})
-
 	if err != nil {
 		ctx.Logger().Error(fmt.Sprintf("Failed to create contact: %s", err.Error()))
 		return err
@@ -71,16 +69,14 @@ func CreateContact(ctx *RouteContext) error {
 }
 
 func GetContact(ctx *RouteContext) error {
-	contactIdStr := ctx.Ctx().Params("id")
-	contactIdInt, err := strconv.Atoi(contactIdStr)
+	contactId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid contact ID")
+		return err
 	}
 
-	contactId := models.RecordId(contactIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	contact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
@@ -99,9 +95,9 @@ func GetContact(ctx *RouteContext) error {
 }
 
 func ListMyContacts(ctx *RouteContext) error {
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	contacts, err := ctx.Db().NewContactRepository().GetContactsByUserId(context.Background(), userId)
@@ -116,16 +112,14 @@ func ListMyContacts(ctx *RouteContext) error {
 }
 
 func UpdateContact(ctx *RouteContext) error {
-	contactIdStr := ctx.Ctx().Params("id")
-	contactIdInt, err := strconv.Atoi(contactIdStr)
+	contactId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid contact ID")
+		return err
 	}
 
-	contactId := models.RecordId(contactIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	existingContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
@@ -172,16 +166,14 @@ func UpdateContact(ctx *RouteContext) error {
 }
 
 func DeleteContact(ctx *RouteContext) error {
-	contactIdStr := ctx.Ctx().Params("id")
-	contactIdInt, err := strconv.Atoi(contactIdStr)
+	contactId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid contact ID")
+		return err
 	}
 
-	contactId := models.RecordId(contactIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	existingContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)

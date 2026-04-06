@@ -55,7 +55,7 @@ func NewAppVersion(textVersion string) (*AppVersion, error) {
 
 	patch, err := strconv.ParseUint(parts[2], 10, 32)
 	if err != nil {
-		return nil, server_error.New("APP_VERSION", "invalid minor version: "+parts[2])
+		return nil, server_error.New("APP_VERSION", "invalid patch version: "+parts[2])
 	}
 
 	return &AppVersion{

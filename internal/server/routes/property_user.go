@@ -49,7 +49,7 @@ type CreatePropertyPayload struct {
 	HasElevator    bool             `json:"hasElevator"`
 	EnergyRating   *string          `json:"energyRating"`
 	VirtualTourURL *string          `json:"virtualTourUrl"`
-	Contacts       []ContactPayload `json:"contacts"` // Changed from singular to plural array
+	Contacts       []ContactPayload `json:"contacts"`
 }
 
 type UpdatePropertyPayload struct {
@@ -81,7 +81,7 @@ type UpdatePropertyPayload struct {
 	HasElevator    *bool            `json:"hasElevator"`
 	EnergyRating   *string          `json:"energyRating"`
 	VirtualTourURL *string          `json:"virtualTourUrl"`
-	Contacts       []ContactPayload `json:"contacts"` // Changed from contactId to contacts array
+	Contacts       []ContactPayload `json:"contacts"`
 }
 
 func CreateProperty(ctx *RouteContext) error {
@@ -90,9 +90,9 @@ func CreateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	if len(payload.Contacts) == 0 {
@@ -102,11 +102,9 @@ func CreateProperty(ctx *RouteContext) error {
 	var contactIDs []models.RecordId
 	var propertyId models.RecordId
 
-	err := ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		// Process each contact in the payload
+	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
 		for _, contactPayload := range payload.Contacts {
 			if contactPayload.ID != nil {
-				// Using existing contact
 				contactId := models.RecordId(*contactPayload.ID)
 
 				existingContact, err := ctx.Db().NewContactRepository().GetContactById(txCtx, contactId)
@@ -120,7 +118,6 @@ func CreateProperty(ctx *RouteContext) error {
 
 				contactIDs = append(contactIDs, contactId)
 			} else {
-				// Creating new contact
 				if contactPayload.Name == nil || contactPayload.Email == nil || contactPayload.Phone == nil {
 					return server_error.New("CONTACT_VALIDATION", "Contact name, email, and phone are required")
 				}
@@ -195,15 +192,13 @@ func CreateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	// Contacts are automatically loaded via WithContacts() in GetPropertyById
-
 	return ctx.RespondData(createdProperty)
 }
 
 func ListMyProperties(ctx *RouteContext) error {
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	limit := 20
@@ -235,8 +230,6 @@ func ListMyProperties(ctx *RouteContext) error {
 		return err
 	}
 
-	// Contacts are automatically loaded via WithContacts() in ListProperties
-
 	return ctx.RespondData(&PropertyListResponse{
 		Properties: properties,
 		Total:      total,
@@ -244,16 +237,14 @@ func ListMyProperties(ctx *RouteContext) error {
 }
 
 func UpdateProperty(ctx *RouteContext) error {
-	propertyIdStr := ctx.Ctx().Params("id")
-	propertyIdInt, err := strconv.Atoi(propertyIdStr)
+	propertyId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid property ID")
+		return err
 	}
 
-	propertyId := models.RecordId(propertyIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
@@ -273,7 +264,6 @@ func UpdateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	// Validate and process contacts if provided
 	var contactIDs []models.RecordId
 	if len(payload.Contacts) > 0 {
 		for _, contactPayload := range payload.Contacts {
@@ -323,12 +313,10 @@ func UpdateProperty(ctx *RouteContext) error {
 	}
 
 	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		// Update property fields
 		if err := ctx.Db().NewPropertyRepository().UpdateProperty(txCtx, tx, propertyId, propertyDTO); err != nil {
 			return err
 		}
 
-		// Update contacts if provided
 		if len(contactIDs) > 0 {
 			if err := ctx.Db().NewPropertyRepository().UpdatePropertyContacts(txCtx, tx, propertyId, contactIDs); err != nil {
 				return err
@@ -350,22 +338,18 @@ func UpdateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	// Contacts are automatically loaded via WithContacts() in GetPropertyById
-
 	return ctx.RespondData(updatedProperty)
 }
 
 func DeleteProperty(ctx *RouteContext) error {
-	propertyIdStr := ctx.Ctx().Params("id")
-	propertyIdInt, err := strconv.Atoi(propertyIdStr)
+	propertyId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid property ID")
+		return err
 	}
 
-	propertyId := models.RecordId(propertyIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
@@ -401,16 +385,14 @@ func DeleteProperty(ctx *RouteContext) error {
 }
 
 func PublishProperty(ctx *RouteContext) error {
-	propertyIdStr := ctx.Ctx().Params("id")
-	propertyIdInt, err := strconv.Atoi(propertyIdStr)
+	propertyId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid property ID")
+		return err
 	}
 
-	propertyId := models.RecordId(propertyIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
@@ -443,16 +425,14 @@ func PublishProperty(ctx *RouteContext) error {
 }
 
 func UnpublishProperty(ctx *RouteContext) error {
-	propertyIdStr := ctx.Ctx().Params("id")
-	propertyIdInt, err := strconv.Atoi(propertyIdStr)
+	propertyId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid property ID")
+		return err
 	}
 
-	propertyId := models.RecordId(propertyIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)

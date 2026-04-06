@@ -19,14 +19,13 @@ type AdminDivision struct {
 }
 
 type LocationValidator struct {
-	districts          map[string]bool // Level 1: Distritos
-	municipalities     map[string]bool // Level 2: Concelhos
-	parishes           map[string]bool // Level 3: Freguesias
-	districtsList      []string        // Sorted list of districts
-	municipalitiesList []string        // Sorted list of municipalities
-	parishesList       []string        // Sorted list of parishes
+	districts          map[string]bool
+	municipalities     map[string]bool
+	parishes           map[string]bool
+	districtsList      []string
+	municipalitiesList []string
+	parishesList       []string
 	postalCodeRe       *regexp.Regexp
-	once               sync.Once
 }
 
 var (
@@ -34,7 +33,6 @@ var (
 	validatorOnce     sync.Once
 )
 
-// GetLocationValidator returns a singleton instance of the location validator
 func GetLocationValidator() (*LocationValidator, error) {
 	var initErr error
 	validatorOnce.Do(func() {
@@ -90,22 +88,18 @@ func (lv *LocationValidator) loadData() error {
 	return nil
 }
 
-// normalizeName normalizes a location name for comparison (lowercase, trimmed)
 func normalizeName(name string) string {
 	return strings.TrimSpace(strings.ToLower(name))
 }
 
-// ValidateCity validates if a city/municipality exists in Portugal
 func (lv *LocationValidator) ValidateCity(city string) bool {
 	if city == "" {
 		return false
 	}
 	normalized := normalizeName(city)
-	// Check both municipalities (level 2) and districts (level 1)
 	return lv.municipalities[normalized] || lv.districts[normalized]
 }
 
-// ValidateMunicipality validates if a municipality (concelho) exists
 func (lv *LocationValidator) ValidateMunicipality(municipality string) bool {
 	if municipality == "" {
 		return false
@@ -114,7 +108,6 @@ func (lv *LocationValidator) ValidateMunicipality(municipality string) bool {
 	return lv.municipalities[normalized]
 }
 
-// ValidateDistrict validates if a district (distrito) exists
 func (lv *LocationValidator) ValidateDistrict(district string) bool {
 	if district == "" {
 		return false
@@ -123,7 +116,6 @@ func (lv *LocationValidator) ValidateDistrict(district string) bool {
 	return lv.districts[normalized]
 }
 
-// ValidateParish validates if a parish (freguesia) exists
 func (lv *LocationValidator) ValidateParish(parish string) bool {
 	if parish == "" {
 		return false
@@ -132,7 +124,6 @@ func (lv *LocationValidator) ValidateParish(parish string) bool {
 	return lv.parishes[normalized]
 }
 
-// ValidatePostalCode validates Portuguese postal code format (XXXX-XXX)
 func (lv *LocationValidator) ValidatePostalCode(postalCode string) bool {
 	if postalCode == "" {
 		return false
@@ -140,7 +131,6 @@ func (lv *LocationValidator) ValidatePostalCode(postalCode string) bool {
 	return lv.postalCodeRe.MatchString(postalCode)
 }
 
-// GetStats returns statistics about loaded data
 func (lv *LocationValidator) GetStats() map[string]int {
 	return map[string]int{
 		"districts":      len(lv.districts),
@@ -149,27 +139,22 @@ func (lv *LocationValidator) GetStats() map[string]int {
 	}
 }
 
-// GetDistricts returns a list of all Portuguese districts
 func (lv *LocationValidator) GetDistricts() []string {
 	return lv.districtsList
 }
 
-// GetMunicipalities returns a list of all Portuguese municipalities
 func (lv *LocationValidator) GetMunicipalities() []string {
 	return lv.municipalitiesList
 }
 
-// GetParishes returns a list of all Portuguese parishes
 func (lv *LocationValidator) GetParishes() []string {
 	return lv.parishesList
 }
 
-// GetCities returns a combined list of districts and municipalities for city selection
 func (lv *LocationValidator) GetCities() []string {
 	citySet := make(map[string]bool)
-	cities := []string{}
+	var cities []string
 
-	// Add all districts
 	for _, district := range lv.districtsList {
 		if !citySet[district] {
 			citySet[district] = true
@@ -177,7 +162,6 @@ func (lv *LocationValidator) GetCities() []string {
 		}
 	}
 
-	// Add all municipalities
 	for _, municipality := range lv.municipalitiesList {
 		if !citySet[municipality] {
 			citySet[municipality] = true

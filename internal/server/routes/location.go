@@ -12,7 +12,6 @@ type LocationsResponse struct {
 	Parishes       []string `json:"parishes"`
 }
 
-// GetLocations returns all Portuguese administrative divisions in a single response
 func GetLocations(ctx *RouteContext) error {
 	validator, err := utils.GetLocationValidator()
 	if err != nil {

@@ -25,16 +25,14 @@ type UpdateImageOrderPayload struct {
 }
 
 func UploadPropertyImage(ctx *RouteContext) error {
-	propertyIdStr := ctx.Ctx().Params("id")
-	propertyIdInt, err := strconv.Atoi(propertyIdStr)
+	propertyId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid property ID")
+		return err
 	}
 
-	propertyId := models.RecordId(propertyIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
@@ -74,11 +72,22 @@ func UploadPropertyImage(ctx *RouteContext) error {
 		return err
 	}
 
+	clientOrder := -1
+	if s := ctx.Ctx().FormValue("displayOrder"); s != "" {
+		if n, parseErr := strconv.Atoi(s); parseErr == nil && n >= 0 {
+			clientOrder = n
+		}
+	}
+
 	var imageId models.RecordId
 	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		nextOrder, err := ctx.Db().NewPropertyImageRepository().GetNextDisplayOrder(txCtx, propertyId)
-		if err != nil {
-			return err
+		displayOrder := clientOrder
+		if displayOrder < 0 {
+			nextOrder, err := ctx.Db().NewPropertyImageRepository().GetNextDisplayOrder(txCtx, propertyId)
+			if err != nil {
+				return err
+			}
+			displayOrder = nextOrder
 		}
 
 		id, err := ctx.Db().NewPropertyImageRepository().CreateImage(
@@ -90,7 +99,7 @@ func UploadPropertyImage(ctx *RouteContext) error {
 			processedImage.Width,
 			processedImage.Height,
 			processedImage.FileSize,
-			nextOrder,
+			displayOrder,
 		)
 		if err != nil {
 			return err
@@ -114,19 +123,16 @@ func UploadPropertyImage(ctx *RouteContext) error {
 }
 
 func DeletePropertyImage(ctx *RouteContext) error {
-	imageIdStr := ctx.Ctx().Params("id")
-	imageIdInt, err := strconv.Atoi(imageIdStr)
+	imageId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid image ID")
+		return err
 	}
 
-	imageId := models.RecordId(imageIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
-	// Get the image to find its property ID
 	image, err := ctx.Db().NewPropertyImageRepository().GetImageMetadataById(context.Background(), imageId)
 	if err != nil {
 		return ctx.RespondError(fiber.StatusNotFound, "IMAGE_NOT_FOUND", "Image not found")
@@ -160,16 +166,14 @@ func DeletePropertyImage(ctx *RouteContext) error {
 }
 
 func UpdatePropertyImageOrder(ctx *RouteContext) error {
-	imageIdStr := ctx.Ctx().Params("id")
-	imageIdInt, err := strconv.Atoi(imageIdStr)
+	imageId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid image ID")
+		return err
 	}
 
-	imageId := models.RecordId(imageIdInt)
-	userId := ctx.GetUserId()
-	if !userId.IsValid() {
-		return ctx.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	userId, err := ctx.RequireUserId()
+	if err != nil {
+		return err
 	}
 
 	payload := &UpdateImageOrderPayload{}
@@ -177,14 +181,12 @@ func UpdatePropertyImageOrder(ctx *RouteContext) error {
 		return err
 	}
 
-	// Get the image to find its property ID
 	image, err := ctx.Db().NewPropertyImageRepository().GetImageMetadataById(context.Background(), imageId)
 	if err != nil {
 		return ctx.RespondError(fiber.StatusNotFound, "IMAGE_NOT_FOUND", "Image not found")
 	}
 
-	propertyId := *image.PropertyID
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
+	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), *image.PropertyID)
 	if err != nil {
 		return err
 	}

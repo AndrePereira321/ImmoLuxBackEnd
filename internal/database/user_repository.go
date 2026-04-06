@@ -122,38 +122,22 @@ func (rep *UserRepository) GetUserAuth(email string) (*models.UserDTO, *models.U
 		return nil, nil, server_error.Wrap("USER_REPOSITORY", "failed querying user with auth", err)
 	}
 
-	auth, err := u.QueryAuth().Only(ctx)
+	auth, err := u.Edges.AuthOrErr()
 	if err != nil {
-		if client.IsNotFound(err) {
-			return nil, nil, server_error.New("USER_AUTH_NOT_FOUND", fmt.Sprintf("user auth not found for user: %s", email))
-		}
-		return nil, nil, server_error.Wrap("USER_REPOSITORY", "failed querying user auth", err)
+		return nil, nil, server_error.New("USER_AUTH_NOT_FOUND", fmt.Sprintf("user auth not found for user: %s", email))
 	}
 
-	userId := models.RecordId(u.ID)
 	userAuthId := models.RecordId(auth.ID)
 	userAuthUserId := models.RecordId(auth.UserID)
 
-	userDTO := &models.UserDTO{
-		ID:        &userId,
-		FirstName: &u.FirstName,
-		LastName:  &u.LastName,
-		Email:     &u.Email,
-		IsActive:  &u.IsActive,
-		CreatedAt: &u.CreatedAt,
-		UpdatedAt: &u.UpdatedAt,
-	}
-
-	userAuthDTO := &models.UserAuthDTO{
+	return rep.userToDTO(u), &models.UserAuthDTO{
 		ID:                &userAuthId,
 		UserID:            &userAuthUserId,
 		Hash:              &auth.Hash,
 		PasswordChangedAt: auth.PasswordChangedAt,
 		CreatedAt:         &auth.CreatedAt,
 		UpdatedAt:         &auth.UpdatedAt,
-	}
-
-	return userDTO, userAuthDTO, nil
+	}, nil
 }
 
 func (rep *UserRepository) validateUserInput(user *models.UserDTO, password string) error {

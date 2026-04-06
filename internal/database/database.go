@@ -74,8 +74,7 @@ func (db *Database) Logger() *logger.Logger {
 }
 
 func (db *Database) Init() error {
-	err := db.initUsers()
-	if err != nil {
+	if err := db.initUsers(); err != nil {
 		db.logger.Warn(fmt.Sprintf("Failed to initialize users. Error: %s", err.Error()))
 		return err
 	}
@@ -168,7 +167,7 @@ func (db *Database) initUsers() error {
 	}
 
 	userRepository := db.NewUserRepository()
-	err := db.WithTransaction(func(ctx context.Context, tx *client.Tx) error {
+	return db.WithTransaction(func(ctx context.Context, tx *client.Tx) error {
 		for _, standardUser := range standardUsers {
 			exists, err := tx.User.Query().
 				Where(user.EmailEQ(standardUser.Email)).
@@ -178,7 +177,7 @@ func (db *Database) initUsers() error {
 				return server_error.Wrap("DB_INIT_USERS", fmt.Sprintf("error checking if user [%s] already exists", standardUser.Email), err)
 			}
 			if exists {
-				db.Logger().Debug(fmt.Sprintf("Skipping standard user. User %s already exists", standardUser.Email))
+				db.logger.Debug(fmt.Sprintf("Skipping standard user. User %s already exists", standardUser.Email))
 				continue
 			}
 
@@ -187,12 +186,8 @@ func (db *Database) initUsers() error {
 			if err != nil {
 				return err
 			}
-			db.Logger().Debug(fmt.Sprintf("Created user %s with id %d", *userDto.Email, userId))
+			db.logger.Debug(fmt.Sprintf("Created user %s with id %d", *userDto.Email, userId))
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	return nil
 }

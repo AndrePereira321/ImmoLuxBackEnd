@@ -113,7 +113,6 @@ func (rep *PropertyRepository) CreateProperty(ctx context.Context, tx *client.Tx
 		builder.SetVirtualTourURL(*propertyDTO.VirtualTourURL)
 	}
 
-	// Add contacts to property if provided
 	if len(propertyDTO.ContactIDs) > 0 {
 		contactIDs := make([]int, len(propertyDTO.ContactIDs))
 		for i, contactID := range propertyDTO.ContactIDs {
@@ -322,27 +321,20 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 		filters.Offset = 0
 	}
 
-	// Apply ordering
-	// Default to status ordering for user properties, otherwise newest first
-	orderBy := "created_desc" // default for public listings
+	orderBy := "created_desc"
 	if filters.PublisherID != nil {
-		// For user's own properties (my-properties endpoint), default to status ordering
 		orderBy = "status"
 	}
 	if filters.OrderBy != nil {
-		// Allow explicit orderBy to override default
 		orderBy = *filters.OrderBy
 	}
 
-	// For status ordering, we need to fetch all results and sort in-memory
 	if orderBy == "status" {
-		// Fetch all matching properties without limit/offset
 		allProperties, err := query.WithContacts().All(ctx)
 		if err != nil {
 			return nil, 0, server_error.Wrap("PROPERTY_LIST", "failed to list properties", err)
 		}
 
-		// Sort by status priority: available (1) -> pending (2) -> sold (3) -> rented (4)
 		sort.Slice(allProperties, func(i, j int) bool {
 			statusPriority := func(s property.Status) int {
 				switch s {
@@ -366,11 +358,9 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 				return priorityI < priorityJ
 			}
 
-			// Secondary sort by created_at DESC (newest first)
 			return allProperties[i].CreatedAt.After(allProperties[j].CreatedAt)
 		})
 
-		// Apply pagination manually
 		start := filters.Offset
 		end := filters.Offset + filters.Limit
 		if start > len(allProperties) {
@@ -389,7 +379,6 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 		return dtos, total, nil
 	}
 
-	// Standard ordering using database
 	switch orderBy {
 	case "price_asc":
 		query = query.Order(client.Asc(property.FieldPrice))
@@ -477,13 +466,11 @@ func (rep *PropertyRepository) UpdatePropertyContacts(ctx context.Context, tx *c
 		return server_error.New("PROPERTY_VALIDATION", "at least one contact is required")
 	}
 
-	// Convert RecordId slice to int slice
 	intContactIDs := make([]int, len(contactIDs))
 	for i, contactID := range contactIDs {
 		intContactIDs[i] = int(contactID)
 	}
 
-	// Clear existing contacts and set new ones
 	err := tx.Property.UpdateOneID(int(propertyId)).
 		ClearContacts().
 		AddContactIDs(intContactIDs...).
@@ -550,7 +537,6 @@ func (rep *PropertyRepository) validatePropertyInput(propertyDTO *models.Propert
 	if len(propertyDTO.ContactIDs) == 0 {
 		return server_error.New("PROPERTY_VALIDATION", "at least one contact is required")
 	}
-	// Validate all contact IDs are valid
 	for _, contactID := range propertyDTO.ContactIDs {
 		if !contactID.IsValid() {
 			return server_error.New("PROPERTY_VALIDATION", "invalid contact ID provided")
@@ -560,31 +546,26 @@ func (rep *PropertyRepository) validatePropertyInput(propertyDTO *models.Propert
 		return server_error.New("PROPERTY_VALIDATION", "publisher ID is required")
 	}
 
-	// Validate location data
 	validator, err := utils.GetLocationValidator()
 	if err != nil {
 		rep.db.Logger().Error(fmt.Sprintf("Failed to initialize location validator: %s", err.Error()))
 		return server_error.New("VALIDATION_ERROR", "failed to validate location")
 	}
 
-	// Validate district (must be a valid district in Portugal)
 	if !validator.ValidateDistrict(*propertyDTO.District) {
 		return server_error.New("INVALID_DISTRICT", fmt.Sprintf("district '%s' is not a valid Portuguese district", *propertyDTO.District))
 	}
 
-	// Validate municipality (must be a valid municipality in Portugal)
 	if !validator.ValidateMunicipality(*propertyDTO.Municipality) {
 		return server_error.New("INVALID_MUNICIPALITY", fmt.Sprintf("municipality '%s' is not a valid Portuguese municipality", *propertyDTO.Municipality))
 	}
 
-	// Validate parish if provided (optional)
 	if propertyDTO.Parish != nil && *propertyDTO.Parish != "" {
 		if !validator.ValidateParish(*propertyDTO.Parish) {
 			return server_error.New("INVALID_PARISH", fmt.Sprintf("parish '%s' is not a valid Portuguese parish", *propertyDTO.Parish))
 		}
 	}
 
-	// Validate postal code format if provided
 	if propertyDTO.PostalCode != nil && *propertyDTO.PostalCode != "" {
 		if !validator.ValidatePostalCode(*propertyDTO.PostalCode) {
 			return server_error.New("INVALID_POSTAL_CODE", "postal code must be in format XXXX-XXX")
@@ -620,16 +601,14 @@ func (rep *PropertyRepository) entToDTO(prop *client.Property) *models.PropertyD
 		UpdatedAt:    &prop.UpdatedAt,
 	}
 
-	// Convert contacts from edges if loaded
-	if prop.Edges.Contacts != nil && len(prop.Edges.Contacts) > 0 {
+	if len(prop.Edges.Contacts) > 0 {
 		contactIDs := make([]models.RecordId, len(prop.Edges.Contacts))
 		contacts := make([]models.ContactDTO, len(prop.Edges.Contacts))
 
 		contactRepo := NewContactRepository(rep.db)
-		for i, contact := range prop.Edges.Contacts {
-			contactIDs[i] = models.RecordId(contact.ID)
-			contactDTO := contactRepo.entToDTO(contact)
-			contacts[i] = *contactDTO
+		for i, c := range prop.Edges.Contacts {
+			contactIDs[i] = models.RecordId(c.ID)
+			contacts[i] = *contactRepo.entToDTO(c)
 		}
 
 		dto.ContactIDs = contactIDs

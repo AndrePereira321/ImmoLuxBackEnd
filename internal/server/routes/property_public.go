@@ -18,13 +18,10 @@ type PropertyListResponse struct {
 }
 
 func GetProperty(ctx *RouteContext) error {
-	propertyIdStr := ctx.Ctx().Params("id")
-	propertyIdInt, err := strconv.Atoi(propertyIdStr)
+	propertyId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid property ID")
+		return err
 	}
-
-	propertyId := models.RecordId(propertyIdInt)
 
 	property, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
 	if err != nil {
@@ -33,8 +30,6 @@ func GetProperty(ctx *RouteContext) error {
 		}
 		return err
 	}
-
-	// Contacts are now automatically loaded via WithContacts() in GetPropertyById
 
 	err = ctx.Db().NewPropertyRepository().IncrementViewCount(context.Background(), propertyId)
 	if err != nil {
@@ -100,8 +95,6 @@ func ListProperties(ctx *RouteContext) error {
 		ctx.Logger().Error(fmt.Sprintf("Failed to list properties: %s", err.Error()))
 		return err
 	}
-
-	// Contacts are now automatically loaded via WithContacts() in ListProperties
 
 	return ctx.RespondData(&PropertyListResponse{
 		Properties: properties,

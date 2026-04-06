@@ -60,77 +60,65 @@ func New(serverConfig *config.ServerConfig) (*Server, error) {
 }
 
 func (s *Server) Listen() error {
-	listenAddress := s.listenAddress()
-
-	s.logger.Info("Starting listening server on " + listenAddress)
-	return s.fiber.Listen(s.listenAddress(), fiber.ListenConfig{
+	addr := s.listenAddress()
+	s.logger.Info("Starting listening server on " + addr)
+	return s.fiber.Listen(addr, fiber.ListenConfig{
 		EnablePrefork: s.config.HttpServer().EnablePreFork(),
 	})
 }
 
 func (s *Server) Get(path string, handler RouteHandler) {
-	s.fiber.Get(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, false)
-	})
+	s.register(s.fiber.Get, path, handler, false)
 }
 
 func (s *Server) Post(path string, handler RouteHandler) {
-	s.fiber.Post(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, false)
-	})
+	s.register(s.fiber.Post, path, handler, false)
 }
 
 func (s *Server) Put(path string, handler RouteHandler) {
-	s.fiber.Put(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, false)
-	})
+	s.register(s.fiber.Put, path, handler, false)
 }
 
 func (s *Server) Delete(path string, handler RouteHandler) {
-	s.fiber.Delete(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, false)
-	})
+	s.register(s.fiber.Delete, path, handler, false)
 }
 
 func (s *Server) SecuredGet(path string, handler RouteHandler) {
-	s.fiber.Get(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, true)
-	})
+	s.register(s.fiber.Get, path, handler, true)
 }
 
 func (s *Server) SecuredPost(path string, handler RouteHandler) {
-	s.fiber.Post(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, true)
-	})
+	s.register(s.fiber.Post, path, handler, true)
 }
 
 func (s *Server) SecuredPut(path string, handler RouteHandler) {
-	s.fiber.Put(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, true)
-	})
+	s.register(s.fiber.Put, path, handler, true)
 }
 
 func (s *Server) SecuredDelete(path string, handler RouteHandler) {
-	s.fiber.Delete(ApiPrefix+path, func(ctx fiber.Ctx) error {
-		return s.handleRoute(ctx, handler, true)
+	s.register(s.fiber.Delete, path, handler, true)
+}
+
+type fiberRegisterFunc func(path string, handler any, handlers ...any) fiber.Router
+
+func (s *Server) register(method fiberRegisterFunc, path string, handler RouteHandler, requireAuth bool) {
+	method(ApiPrefix+path, func(ctx fiber.Ctx) error {
+		return s.handleRoute(ctx, handler, requireAuth)
 	})
 }
 
 func (s *Server) handleRoute(ctx fiber.Ctx, handler RouteHandler, requireAuth bool) error {
 	routeContext := routes.GetRouteContext(s.logger, ctx, s.db, s.config)
 	if requireAuth && !routeContext.IsAuthenticated() {
-		authError := routeContext.GetAuthError()
-		if authError != nil {
+		if authError := routeContext.GetAuthError(); authError != nil {
 			return routeContext.RespondError(fiber.StatusUnauthorized, authError.Code, authError.Message)
 		}
 		return routeContext.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
 	}
 
-	err := handler(routeContext)
-	if err != nil {
+	if err := handler(routeContext); err != nil {
 		return handleServerError(routeContext, err)
 	}
-
 	return nil
 }
 
@@ -176,7 +164,7 @@ func (s *Server) Close() []error {
 	if s.logger != nil {
 		err := s.logger.Close()
 		if err != nil {
-			errors = append(errors, server_error.Wrap("SERVER_CLOSE", "failed closing database", err))
+			errors = append(errors, server_error.Wrap("SERVER_CLOSE", "failed closing logger", err))
 		}
 	}
 	return errors
@@ -187,6 +175,7 @@ func getFiberApp(serverConfig *config.ServerConfig) *fiber.App {
 		AppName:     serverConfig.AppConfig().Name(),
 		JSONEncoder: json.Marshal,
 		JSONDecoder: json.Unmarshal,
+		BodyLimit:   10 * 1024 * 1024, // 10 MB
 	})
 }
 

@@ -2,7 +2,10 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+
 	"immo-lux/internal/config"
 	"immo-lux/internal/database"
 	"immo-lux/internal/logger"
@@ -120,6 +123,26 @@ func (route *RouteContext) ReadBody(body any) error {
 	return nil
 }
 
+// ParseIdParam parses a route parameter as a RecordId.
+// Returns the parsed ID or an error response if the parameter is not a valid integer.
+func (route *RouteContext) ParseIdParam(paramName string) (models.RecordId, error) {
+	idStr := route.ctx.Params(paramName)
+	idInt, err := strconv.Atoi(idStr)
+	if err != nil {
+		return models.InvalidRecordId, route.BadRequest("Invalid " + paramName + " ID")
+	}
+	return models.RecordId(idInt), nil
+}
+
+// RequireUserId returns the authenticated user's ID or sends an unauthorized response.
+func (route *RouteContext) RequireUserId() (models.RecordId, error) {
+	userId := route.GetUserId()
+	if !userId.IsValid() {
+		return models.InvalidRecordId, route.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+	}
+	return userId, nil
+}
+
 func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *config.ServerConfig, logger *logger.Logger) (*UserContext, *AuthError) {
 	jwtToken := ctx.Cookies(config.SessionCookieName)
 	if jwtToken == "" {
@@ -133,21 +156,13 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 	claims, err := utils.ValidateJWT(jwtToken, jwtSecret)
 	if err != nil {
 		logger.Debug(fmt.Sprintf("Invalid JWT token: %s", err.Error()))
-
-		// Clear invalid cookie
 		clearSessionCookie(ctx, serverConfig)
 
-		if server_error.IsServerError(err, "JWT_VALIDATION") {
-			serverErr := err.(*server_error.ServerError)
-			if serverErr.Contains("expired") {
-				return nil, &AuthError{
-					Code:    "JWT_EXPIRED",
-					Message: "Session token has expired",
-				}
-			}
+		var serverErr *server_error.ServerError
+		if errors.As(err, &serverErr) && serverErr.Contains("expired") {
 			return nil, &AuthError{
-				Code:    "JWT_INVALID",
-				Message: "Session token is invalid",
+				Code:    "JWT_EXPIRED",
+				Message: "Session token has expired",
 			}
 		}
 		return nil, &AuthError{
@@ -163,7 +178,6 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 	if err != nil {
 		logger.Warn(fmt.Sprintf("Error validating session: %s", err.Error()))
 
-		// Clear cookie if session not found in database
 		if server_error.IsServerError(err, "SESSION_NOT_FOUND") {
 			clearSessionCookie(ctx, serverConfig)
 			return nil, &AuthError{
@@ -180,8 +194,6 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 
 	if !isValid {
 		logger.Debug(fmt.Sprintf("Session %d is not valid or expired", sessionId))
-
-		// Clear cookie if session is invalid/expired
 		clearSessionCookie(ctx, serverConfig)
 
 		return nil, &AuthError{

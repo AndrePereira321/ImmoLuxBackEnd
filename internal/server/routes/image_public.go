@@ -3,22 +3,17 @@ package routes
 import (
 	"context"
 	"fmt"
-	"strconv"
 
-	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
 
 	"github.com/gofiber/fiber/v3"
 )
 
 func GetPropertyImages(ctx *RouteContext) error {
-	propertyIdStr := ctx.Ctx().Params("id")
-	propertyIdInt, err := strconv.Atoi(propertyIdStr)
+	propertyId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid property ID")
+		return err
 	}
-
-	propertyId := models.RecordId(propertyIdInt)
 
 	images, err := ctx.Db().NewPropertyImageRepository().GetImagesByPropertyId(context.Background(), propertyId)
 	if err != nil {
@@ -32,13 +27,10 @@ func GetPropertyImages(ctx *RouteContext) error {
 }
 
 func GetImage(ctx *RouteContext) error {
-	imageIdStr := ctx.Ctx().Params("id")
-	imageIdInt, err := strconv.Atoi(imageIdStr)
+	imageId, err := ctx.ParseIdParam("id")
 	if err != nil {
-		return ctx.BadRequest("Invalid image ID")
+		return err
 	}
-
-	imageId := models.RecordId(imageIdInt)
 
 	imageData, contentType, err := ctx.Db().NewPropertyImageRepository().GetImageById(context.Background(), imageId)
 	if err != nil {

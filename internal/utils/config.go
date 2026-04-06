@@ -23,17 +23,14 @@ func (u *StandardUser) ToUserDTO(isActive bool) *models.UserDTO {
 }
 
 func ReadStandardUsers(filePath string) []StandardUser {
-	users := make([]StandardUser, 0)
 	if filePath == "" {
-		return users
-	}
-	if _, err := os.Stat(filePath); err != nil {
-		return users
+		return nil
 	}
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
-		return users
+		return nil
 	}
-	err = json.Unmarshal(fileData, &users)
+	var users []StandardUser
+	_ = json.Unmarshal(fileData, &users)
 	return users
 }

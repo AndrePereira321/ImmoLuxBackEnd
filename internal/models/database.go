@@ -6,5 +6,5 @@ const InvalidRecordId = RecordId(-1)
 const UnknownRecordId = RecordId(-2)
 
 func (rid RecordId) IsValid() bool {
-	return rid >= 0 && rid != InvalidRecordId && rid != UnknownRecordId
+	return rid >= 0
 }

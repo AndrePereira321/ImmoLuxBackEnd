@@ -21,12 +21,7 @@ type LoginPayload struct {
 	RememberMe bool   `json:"rememberMe"`
 }
 
-type LoginResponse struct {
-	IsConnected bool            `json:"isConnected"`
-	UserData    *models.UserDTO `json:"userData"`
-}
-
-type IsConnectedResponse struct {
+type AuthStatusResponse struct {
 	IsConnected bool            `json:"isConnected"`
 	UserData    *models.UserDTO `json:"userData"`
 }
@@ -148,7 +143,7 @@ func Login(ctx *RouteContext) error {
 		Bool("rememberMe", payload.RememberMe).
 		Msg("User logged in successfully")
 
-	return ctx.RespondData(&LoginResponse{
+	return ctx.RespondData(&AuthStatusResponse{
 		IsConnected: true,
 		UserData:    userDto,
 	})
@@ -156,7 +151,7 @@ func Login(ctx *RouteContext) error {
 
 func IsConnected(ctx *RouteContext) error {
 	if !ctx.IsAuthenticated() {
-		return ctx.RespondData(&IsConnectedResponse{
+		return ctx.RespondData(&AuthStatusResponse{
 			IsConnected: false,
 			UserData:    nil,
 		})
@@ -166,13 +161,13 @@ func IsConnected(ctx *RouteContext) error {
 	userDto, err := ctx.Db().NewUserRepository().GetUserById(context.Background(), userId)
 	if err != nil {
 		ctx.Logger().Warn(fmt.Sprintf("Failed to get user %d: %s", userId, err.Error()))
-		return ctx.RespondData(&IsConnectedResponse{
+		return ctx.RespondData(&AuthStatusResponse{
 			IsConnected: false,
 			UserData:    nil,
 		})
 	}
 
-	return ctx.RespondData(&IsConnectedResponse{
+	return ctx.RespondData(&AuthStatusResponse{
 		IsConnected: true,
 		UserData:    userDto,
 	})
@@ -239,13 +234,12 @@ func createSessionCookie(token string, rememberMe bool, cfg *config.ServerConfig
 }
 
 func clearSessionCookie(ctx fiber.Ctx, cfg *config.ServerConfig) {
-	cookieSecure := cfg.Security().CookieSecure()
 	ctx.Cookie(&fiber.Cookie{
 		Name:     config.SessionCookieName,
 		Value:    "",
-		Expires:  time.Unix(0, 0), // January 1, 1970
+		Expires:  time.Unix(0, 0),
 		HTTPOnly: true,
-		Secure:   cookieSecure,
+		Secure:   cfg.Security().CookieSecure(),
 		SameSite: fiber.CookieSameSiteStrictMode,
 		Path:     "/",
 	})
