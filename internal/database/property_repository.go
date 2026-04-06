@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"immo-lux/internal/database/ent/client"
@@ -667,4 +668,123 @@ func (rep *PropertyRepository) entToDTO(prop *client.Property) *models.PropertyD
 	}
 
 	return dto
+}
+
+// GetLocationStats returns aggregate stats for all published properties in a district
+// (and optionally a municipality). district must be the canonical DB value (e.g. "Lisboa").
+func (rep *PropertyRepository) GetLocationStats(ctx context.Context, district string, municipality *string) (*models.LocationStatsDTO, error) {
+	query := rep.db.client.Property.Query().
+		Where(
+			property.IsPublishedEQ(true),
+			property.DistrictEQ(district),
+		)
+	if municipality != nil {
+		query = query.Where(property.MunicipalityEQ(*municipality))
+	}
+
+	total, err := query.Count(ctx)
+	if err != nil {
+		return nil, server_error.Wrap("LOCATION_STATS", "failed to count properties", err)
+	}
+	if total == 0 {
+		dto := &models.LocationStatsDTO{District: district, Municipality: municipality, Total: 0}
+		return dto, nil
+	}
+
+	props, err := query.All(ctx)
+	if err != nil {
+		return nil, server_error.Wrap("LOCATION_STATS", "failed to fetch properties for stats", err)
+	}
+
+	minPrice := props[0].Price
+	maxPrice := props[0].Price
+	var sumPrice float64
+	typeCounts := make(map[string]int)
+
+	for _, p := range props {
+		if p.Price < minPrice {
+			minPrice = p.Price
+		}
+		if p.Price > maxPrice {
+			maxPrice = p.Price
+		}
+		sumPrice += p.Price
+		typeCounts[string(p.PropertyType)]++
+	}
+
+	mostCommonType := "house"
+	maxCount := 0
+	for t, count := range typeCounts {
+		if count > maxCount {
+			maxCount = count
+			mostCommonType = t
+		}
+	}
+
+	return &models.LocationStatsDTO{
+		District:       district,
+		Municipality:   municipality,
+		Total:          total,
+		MinPrice:       minPrice,
+		MaxPrice:       maxPrice,
+		AvgPrice:       sumPrice / float64(total),
+		MostCommonType: mostCommonType,
+	}, nil
+}
+
+// GetPublishedLocations returns all districts and municipalities that have at least
+// one published property, with the most recent updatedAt per location.
+func (rep *PropertyRepository) GetPublishedLocations(ctx context.Context) (*models.PublishedLocationsDTO, error) {
+	props, err := rep.db.client.Property.Query().
+		Where(property.IsPublishedEQ(true)).
+		All(ctx)
+	if err != nil {
+		return nil, server_error.Wrap("PUBLISHED_LOCATIONS", "failed to fetch published properties", err)
+	}
+
+	districtMap := make(map[string]time.Time)
+	municipalityMap := make(map[string]time.Time) // key = "District|Municipality"
+
+	for _, p := range props {
+		if t, ok := districtMap[p.District]; !ok || p.UpdatedAt.After(t) {
+			districtMap[p.District] = p.UpdatedAt
+		}
+		key := p.District + "|" + p.Municipality
+		if t, ok := municipalityMap[key]; !ok || p.UpdatedAt.After(t) {
+			municipalityMap[key] = p.UpdatedAt
+		}
+	}
+
+	districts := make([]models.PublishedLocationDTO, 0, len(districtMap))
+	for name, updatedAt := range districtMap {
+		districts = append(districts, models.PublishedLocationDTO{
+			Name:      name,
+			Slug:      utils.Slugify(name),
+			UpdatedAt: updatedAt,
+		})
+	}
+	sort.Slice(districts, func(i, j int) bool { return districts[i].Name < districts[j].Name })
+
+	municipalities := make([]models.PublishedLocationDTO, 0, len(municipalityMap))
+	for key, updatedAt := range municipalityMap {
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		districtName := parts[0]
+		municipalityName := parts[1]
+		municipalities = append(municipalities, models.PublishedLocationDTO{
+			Name:         municipalityName,
+			Slug:         utils.Slugify(municipalityName),
+			District:     districtName,
+			DistrictSlug: utils.Slugify(districtName),
+			UpdatedAt:    updatedAt,
+		})
+	}
+	sort.Slice(municipalities, func(i, j int) bool { return municipalities[i].Name < municipalities[j].Name })
+
+	return &models.PublishedLocationsDTO{
+		Districts:      districts,
+		Municipalities: municipalities,
+	}, nil
 }
