@@ -3,17 +3,29 @@
 ################################################################################
 # ImmoLux Deployment Script
 #
-# This script automatically:
-# - Pulls latest changes from git
-# - Installs/updates dependencies
-# - Builds frontend (SvelteKit)
-# - Builds backend (Go)
-# - Restarts the service
+# Deploys backend (Go) and frontend (SvelteKit) with minimal downtime:
+# - Pulls latest changes from git (--ff-only, machine-generated files restored
+#   first so pulls never fail on a dirty package-lock.json / go.sum again)
+# - Installs dependencies reproducibly (npm ci — never rewrites the lockfile;
+#   go mod download — never rewrites go.mod/go.sum)
+# - Builds BOTH services BEFORE stopping anything: a failed build leaves the
+#   currently running version untouched
+# - Swaps the backend binary atomically, restarts services, health-checks
 #
-# Usage: ./deploy.sh [--skip-restart]
+# Usage: ./deploy.sh [options]
+#   --skip-restart    Build and stage everything, but do not restart services
+#   --backend-only    Only update/build/restart the backend
+#   --frontend-only   Only update/build/restart the frontend
+#   --force-install   If npm ci fails (lockfile out of sync), fall back to
+#                     npm install instead of aborting
+#   --help            Show this help
+#
+# Environment overrides:
+#   PROJECT_ROOT         (default /opt/immolux)
+#   BACKEND_HEALTH_URL   (default http://127.0.0.1:8082/v1/api/ping)
 ################################################################################
 
-set -e  # Exit on any error
+set -Eeuo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -23,331 +35,380 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_ROOT="/opt/immolux"
+PROJECT_ROOT="${PROJECT_ROOT:-/opt/immolux}"
 BACKEND_DIR="$PROJECT_ROOT/backend"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 SERVICE_NAME="immolux"
 FRONTEND_SERVICE_NAME="immolux-frontend"
-SKIP_RESTART=false
+BACKEND_BINARY="immo-lux-server"
+BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8082/v1/api/ping}"
 
-# Parse arguments
-for arg in "$@"; do
-    case $arg in
-        --skip-restart)
-            SKIP_RESTART=true
-            shift
-            ;;
-    esac
-done
+SKIP_RESTART=false
+DO_BACKEND=true
+DO_FRONTEND=true
+FORCE_INSTALL=false
+SERVICES_STOPPED=false
 
 ################################################################################
 # Helper Functions
 ################################################################################
 
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+
+banner() {
+    log_info "========================================="
+    log_info "  $1"
+    log_info "========================================="
+    echo ""
 }
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+usage() {
+    sed -n '/^# Usage:/,/^####/p' "$0" | sed 's/^# \{0,1\}//' | head -n -1
 }
 
 check_command() {
-    if ! command -v $1 &> /dev/null; then
+    if ! command -v "$1" &> /dev/null; then
         log_error "$1 is not installed. Please install it first."
         exit 1
     fi
 }
 
+# Frontend toolchain (Vite 8 / vite-imagetools 10) requires Node ^22.12 || >=24
 check_node_version() {
-    NODE_VERSION=$(node --version | sed 's/v//' | cut -d. -f1)
-    if [ "$NODE_VERSION" -lt 20 ]; then
-        log_error "Node.js version 20+ is required. Current version: $(node --version)"
-        log_info "Install Node 20+:"
-        log_info "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+    local major minor
+    major=$(node --version | sed 's/v//' | cut -d. -f1)
+    minor=$(node --version | sed 's/v//' | cut -d. -f2)
+    if [ "$major" -ge 24 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }; then
+        log_info "Node.js version check passed: $(node --version)"
+    else
+        log_error "Node.js 22.12+ (or 24+) is required. Current version: $(node --version)"
+        log_info "Install Node 22:"
+        log_info "  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
         log_info "  sudo apt install -y nodejs"
         exit 1
     fi
-    log_info "Node.js version check passed: v$NODE_VERSION"
 }
 
-
-################################################################################
-# Pre-flight Checks
-################################################################################
-
-log_info "Starting ImmoLux deployment..."
-echo ""
-
-log_info "Running pre-flight checks..."
-
-# Check if running from correct directory
-if [ ! -d "$PROJECT_ROOT" ]; then
-    log_error "Project root directory not found: $PROJECT_ROOT"
-    exit 1
-fi
-
-# Check required commands
-check_command "git"
-check_command "go"
-check_command "npm"
-
-# Check Go version
-GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-log_info "Go version: $GO_VERSION"
-
-# Check Node version
-check_node_version
-NODE_VERSION=$(node --version)
-log_info "Node version: $NODE_VERSION"
-
-log_success "Pre-flight checks passed!"
-echo ""
-
-################################################################################
-# Stop Service (if not skipping restart)
-################################################################################
-
-if [ "$SKIP_RESTART" = false ]; then
-    log_info "Stopping services..."
-
-    if systemctl is-active --quiet $FRONTEND_SERVICE_NAME; then
-        sudo systemctl stop $FRONTEND_SERVICE_NAME
-        log_success "Frontend service stopped"
+# go.mod requires go 1.25+
+check_go_version() {
+    local version major minor
+    version=$(go version | awk '{print $3}' | sed 's/go//')
+    major=$(echo "$version" | cut -d. -f1)
+    minor=$(echo "$version" | cut -d. -f2)
+    if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 25 ]; }; then
+        log_info "Go version check passed: $version"
     else
-        log_warning "Frontend service was not running"
+        log_error "Go 1.25+ is required. Current version: $version"
+        exit 1
     fi
+}
 
-    if systemctl is-active --quiet $SERVICE_NAME; then
-        sudo systemctl stop $SERVICE_NAME
-        log_success "Backend service stopped"
+# Restore machine-generated files the build tools may have touched on the
+# server, so `git pull` never fails because of them. Anything else that is
+# dirty is reported but left alone.
+git_prepare_tree() {
+    local file
+    for file in "$@"; do
+        if [ -f "$file" ] && ! git diff --quiet -- "$file" 2>/dev/null; then
+            log_warning "Restoring locally modified $file (server copies must stay pristine)"
+            git checkout -- "$file"
+        fi
+    done
+    if [ -n "$(git status --porcelain)" ]; then
+        log_warning "Working tree has local changes (left untouched):"
+        git status --porcelain | head -10
+    fi
+}
+
+git_pull_repo() {
+    log_info "Pulling latest changes from git..."
+    git fetch origin
+    local branch before after
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    log_info "Current branch: $branch"
+
+    before=$(git rev-parse HEAD)
+    if ! git pull --ff-only origin "$branch"; then
+        log_error "git pull failed. Resolve the conflict on the server (usually:"
+        log_error "  git status && git checkout -- <file>  or  git stash) and redeploy."
+        exit 1
+    fi
+    after=$(git rev-parse HEAD)
+
+    if [ "$before" = "$after" ]; then
+        log_info "Already up to date"
     else
-        log_warning "Backend service was not running"
+        log_success "Updated: ${before:0:9} -> ${after:0:9}"
     fi
     echo ""
-fi
+}
+
+# If the deploy fails after services were stopped, try to bring them back up
+# with whatever version is on disk instead of leaving the site down.
+on_error() {
+    local exit_code=$?
+    log_error "Deployment failed (exit code $exit_code, line ${BASH_LINENO[0]})"
+    if [ "$SERVICES_STOPPED" = true ]; then
+        log_warning "Attempting to restart services with the version currently on disk..."
+        [ "$DO_BACKEND" = true ] && sudo systemctl start "$SERVICE_NAME" || true
+        [ "$DO_FRONTEND" = true ] && sudo systemctl start "$FRONTEND_SERVICE_NAME" || true
+    fi
+    exit "$exit_code"
+}
+trap on_error ERR
 
 ################################################################################
-# Update Backend
+# Phases
 ################################################################################
 
-log_info "========================================="
-log_info "  UPDATING BACKEND"
-log_info "========================================="
-echo ""
+preflight() {
+    banner "PRE-FLIGHT CHECKS"
 
-cd "$BACKEND_DIR"
+    if [ ! -d "$PROJECT_ROOT" ]; then
+        log_error "Project root directory not found: $PROJECT_ROOT"
+        exit 1
+    fi
 
-# Pull latest changes
-log_info "Pulling latest changes from git..."
-git fetch origin
-BACKEND_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-log_info "Current branch: $BACKEND_BRANCH"
+    check_command "git"
+    if [ "$DO_BACKEND" = true ]; then
+        check_command "go"
+        check_go_version
+    fi
+    if [ "$DO_FRONTEND" = true ]; then
+        check_command "npm"
+        check_command "node"
+        check_node_version
+    fi
 
-BEFORE_COMMIT=$(git rev-parse HEAD)
-git pull origin "$BACKEND_BRANCH"
-AFTER_COMMIT=$(git rev-parse HEAD)
-
-if [ "$BEFORE_COMMIT" = "$AFTER_COMMIT" ]; then
-    log_info "Backend is already up to date"
-else
-    log_success "Backend updated: $BEFORE_COMMIT -> $AFTER_COMMIT"
-fi
-echo ""
-
-# Install/update dependencies
-log_info "Installing Go dependencies..."
-go mod download
-go mod tidy
-log_success "Go dependencies installed"
-echo ""
-
-# Generate Ent code (if schema changed)
-if [ -d "internal/database/ent/schema" ]; then
-    log_info "Generating Ent client code..."
-    go generate ./internal/database/ent
-    log_success "Ent code generated"
+    log_success "Pre-flight checks passed!"
     echo ""
-fi
+}
 
-# Build backend
-log_info "Building backend..."
-go build -ldflags="-s -w" -o immo-lux-server ./internal
+build_backend() {
+    banner "BUILDING BACKEND"
+    cd "$BACKEND_DIR"
 
-if [ $? -eq 0 ]; then
-    log_success "Backend built successfully"
+    git_prepare_tree go.mod go.sum
+    git_pull_repo
 
-    # Make executable
-    chmod +x immo-lux-server
+    # Reproducible install: go.mod/go.sum come from git and are never
+    # rewritten here (no `go mod tidy` on the server!).
+    log_info "Downloading Go dependencies..."
+    go mod download
+    log_success "Go dependencies ready"
+    echo ""
 
-    # Show binary info
-    BINARY_SIZE=$(du -h immo-lux-server | cut -f1)
-    log_info "Binary size: $BINARY_SIZE"
-else
-    log_error "Backend build failed!"
-    exit 1
-fi
-echo ""
+    if [ -d "internal/database/ent/schema" ]; then
+        log_info "Generating Ent client code..."
+        go generate ./internal/database/ent
+        log_success "Ent code generated"
+        echo ""
+    fi
 
-################################################################################
-# Update Frontend
-################################################################################
+    # Build to a staging name — the running binary is not touched until the
+    # swap phase, and a failed build changes nothing.
+    log_info "Building backend..."
+    go build -ldflags="-s -w" -o "$BACKEND_BINARY.new" ./internal
+    chmod +x "$BACKEND_BINARY.new"
+    log_success "Backend built successfully ($(du -h "$BACKEND_BINARY.new" | cut -f1))"
+    echo ""
+}
 
-log_info "========================================="
-log_info "  UPDATING FRONTEND"
-log_info "========================================="
-echo ""
+build_frontend() {
+    banner "BUILDING FRONTEND"
+    cd "$FRONTEND_DIR"
 
-cd "$FRONTEND_DIR"
+    git_prepare_tree package-lock.json
+    git_pull_repo
 
-# Pull latest changes
-log_info "Pulling latest changes from git..."
-git fetch origin
-FRONTEND_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-log_info "Current branch: $FRONTEND_BRANCH"
+    # npm ci installs exactly what package-lock.json pins and NEVER rewrites
+    # it — this is what keeps the next `git pull` conflict-free.
+    log_info "Installing npm dependencies (npm ci)..."
+    if ! npm ci --include=dev --no-audit --no-fund; then
+        if [ "$FORCE_INSTALL" = true ]; then
+            log_warning "npm ci failed — falling back to npm install (--force-install)"
+            npm install --include=dev --no-audit --no-fund
+        else
+            log_error "npm ci failed. package-lock.json is likely out of sync with package.json."
+            log_error "Fix it on your dev machine: run 'npm install', commit package-lock.json, redeploy."
+            log_error "(Or rerun with --force-install to bypass once.)"
+            exit 1
+        fi
+    fi
+    log_success "npm dependencies installed"
+    echo ""
 
-BEFORE_COMMIT=$(git rev-parse HEAD)
-git pull origin "$FRONTEND_BRANCH"
-AFTER_COMMIT=$(git rev-parse HEAD)
-
-if [ "$BEFORE_COMMIT" = "$AFTER_COMMIT" ]; then
-    log_info "Frontend is already up to date"
-else
-    log_success "Frontend updated: $BEFORE_COMMIT -> $AFTER_COMMIT"
-fi
-echo ""
-
-# Install/update dependencies
-log_info "Installing npm dependencies..."
-npm install --production=false
-log_success "npm dependencies installed"
-echo ""
-
-# Build frontend
-log_info "Building frontend for production..."
-npm run build
-
-if [ $? -eq 0 ]; then
+    log_info "Building frontend for production..."
+    npm run build
     log_success "Frontend built successfully"
 
-    # Show build folder size
     if [ -d "build" ]; then
-        BUILD_SIZE=$(du -sh build | cut -f1)
-        log_info "Build folder size: $BUILD_SIZE"
-
-        # Count files in build
-        FILE_COUNT=$(find build -type f | wc -l)
-        log_info "Files in build: $FILE_COUNT"
+        log_info "Build folder size: $(du -sh build | cut -f1), files: $(find build -type f | wc -l)"
     fi
-else
-    log_error "Frontend build failed!"
-    exit 1
-fi
-echo ""
+    echo ""
+}
 
-################################################################################
-# Verify Build Outputs
-################################################################################
+verify_outputs() {
+    banner "VERIFYING BUILD OUTPUTS"
 
-log_info "========================================="
-log_info "  VERIFYING BUILD OUTPUTS"
-log_info "========================================="
-echo ""
+    if [ "$DO_BACKEND" = true ]; then
+        if [ -f "$BACKEND_DIR/$BACKEND_BINARY.new" ]; then
+            log_success "Backend binary staged: $BACKEND_DIR/$BACKEND_BINARY.new"
+        else
+            log_error "Staged backend binary not found!"
+            exit 1
+        fi
+    fi
 
-# Check backend binary
-if [ -f "$BACKEND_DIR/immo-lux-server" ]; then
-    log_success "Backend binary exists: $BACKEND_DIR/immo-lux-server"
-else
-    log_error "Backend binary not found!"
-    exit 1
-fi
+    if [ "$DO_FRONTEND" = true ]; then
+        if [ -f "$FRONTEND_DIR/build/index.js" ]; then
+            log_success "Frontend build exists: $FRONTEND_DIR/build/index.js"
+        else
+            log_error "Frontend build/index.js not found!"
+            exit 1
+        fi
+    fi
+    echo ""
+}
 
-# Check frontend build (adapter-node entry point)
-if [ -f "$FRONTEND_DIR/build/index.js" ]; then
-    log_success "Frontend build exists: $FRONTEND_DIR/build/index.js"
-else
-    log_error "Frontend build/index.js not found!"
-    exit 1
-fi
-echo ""
+swap_backend_binary() {
+    # Atomic on the same filesystem; safe even if the old binary is running.
+    mv -f "$BACKEND_DIR/$BACKEND_BINARY.new" "$BACKEND_DIR/$BACKEND_BINARY"
+    log_success "Backend binary swapped into place"
+}
 
-################################################################################
-# Start Service (if not skipping restart)
-################################################################################
+health_check_backend() {
+    if ! command -v curl &> /dev/null; then
+        return 0
+    fi
+    log_info "Health-checking backend at $BACKEND_HEALTH_URL ..."
+    local i
+    for i in $(seq 1 15); do
+        if curl -sf --max-time 2 "$BACKEND_HEALTH_URL" > /dev/null 2>&1; then
+            log_success "Backend responds to ping"
+            return 0
+        fi
+        sleep 1
+    done
+    log_warning "Backend did not answer at $BACKEND_HEALTH_URL after 15s."
+    log_warning "If the port/path differs, set BACKEND_HEALTH_URL. Logs:"
+    log_warning "  sudo journalctl -u $SERVICE_NAME -n 50"
+}
 
-if [ "$SKIP_RESTART" = false ]; then
-    log_info "========================================="
-    log_info "  RESTARTING SERVICES"
-    log_info "========================================="
+restart_services() {
+    if [ "$SKIP_RESTART" = true ]; then
+        log_warning "Skipping service restart (--skip-restart flag)"
+        if [ "$DO_BACKEND" = true ]; then
+            swap_backend_binary
+            log_info "New backend binary is in place; restart manually with:"
+            log_info "  sudo systemctl restart $SERVICE_NAME"
+        fi
+        if [ "$DO_FRONTEND" = true ]; then
+            log_info "Restart frontend manually with:"
+            log_info "  sudo systemctl restart $FRONTEND_SERVICE_NAME"
+        fi
+        echo ""
+        return 0
+    fi
+
+    banner "RESTARTING SERVICES"
+
+    # Everything is already built — the stop/start window is only seconds.
+    log_info "Stopping services..."
+    SERVICES_STOPPED=true
+    if [ "$DO_FRONTEND" = true ]; then
+        sudo systemctl stop "$FRONTEND_SERVICE_NAME" || log_warning "Frontend service was not running"
+    fi
+    if [ "$DO_BACKEND" = true ]; then
+        sudo systemctl stop "$SERVICE_NAME" || log_warning "Backend service was not running"
+    fi
+
+    if [ "$DO_BACKEND" = true ]; then
+        swap_backend_binary
+        log_info "Starting backend service..."
+        sudo systemctl start "$SERVICE_NAME"
+        sleep 2
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            log_success "Backend service started"
+        else
+            log_error "Backend service failed to start!"
+            log_error "Check logs with: sudo journalctl -u $SERVICE_NAME -n 50"
+            exit 1
+        fi
+        health_check_backend
+    fi
+
+    if [ "$DO_FRONTEND" = true ]; then
+        log_info "Starting frontend service..."
+        sudo systemctl start "$FRONTEND_SERVICE_NAME"
+        sleep 2
+        if systemctl is-active --quiet "$FRONTEND_SERVICE_NAME"; then
+            log_success "Frontend service started"
+        else
+            log_error "Frontend service failed to start!"
+            log_error "Check logs with: sudo journalctl -u $FRONTEND_SERVICE_NAME -n 50"
+            exit 1
+        fi
+    fi
+
+    SERVICES_STOPPED=false
+    echo ""
+}
+
+summary() {
+    banner "DEPLOYMENT COMPLETED SUCCESSFULLY!"
+
+    if [ "$DO_BACKEND" = true ]; then
+        cd "$BACKEND_DIR"
+        log_info "Backend:  $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)"
+    fi
+    if [ "$DO_FRONTEND" = true ]; then
+        cd "$FRONTEND_DIR"
+        log_info "Frontend: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)"
+    fi
     echo ""
 
-    log_info "Starting backend service..."
-    sudo systemctl start $SERVICE_NAME
-    sleep 2
-    if systemctl is-active --quiet $SERVICE_NAME; then
-        log_success "Backend service started"
-    else
-        log_error "Backend service failed to start!"
-        log_error "Check logs with: sudo journalctl -u $SERVICE_NAME -n 50"
+    log_info "Useful commands:"
+    log_info "  Backend logs:     tail -f $BACKEND_DIR/logs/SERVER.log"
+    log_info "  Backend status:   sudo systemctl status $SERVICE_NAME"
+    log_info "  Frontend status:  sudo systemctl status $FRONTEND_SERVICE_NAME"
+    log_info "  Restart all:      sudo systemctl restart $SERVICE_NAME $FRONTEND_SERVICE_NAME"
+    echo ""
+
+    log_success "Deployment completed at $(date)"
+}
+
+main() {
+    for arg in "$@"; do
+        case $arg in
+            --skip-restart)  SKIP_RESTART=true ;;
+            --backend-only)  DO_FRONTEND=false ;;
+            --frontend-only) DO_BACKEND=false ;;
+            --force-install) FORCE_INSTALL=true ;;
+            --help|-h)       usage; exit 0 ;;
+            *) log_error "Unknown option: $arg"; usage; exit 1 ;;
+        esac
+    done
+
+    if [ "$DO_BACKEND" = false ] && [ "$DO_FRONTEND" = false ]; then
+        log_error "--backend-only and --frontend-only are mutually exclusive"
         exit 1
     fi
 
-    log_info "Starting frontend service..."
-    sudo systemctl start $FRONTEND_SERVICE_NAME
-    sleep 2
-    if systemctl is-active --quiet $FRONTEND_SERVICE_NAME; then
-        log_success "Frontend service started"
-        sudo systemctl status $FRONTEND_SERVICE_NAME --no-pager -l
-    else
-        log_error "Frontend service failed to start!"
-        log_error "Check logs with: sudo journalctl -u $FRONTEND_SERVICE_NAME -n 50"
-        exit 1
-    fi
+    log_info "Starting ImmoLux deployment..."
     echo ""
-else
-    log_warning "Skipping service restart (--skip-restart flag)"
-    log_info "To start manually:"
-    log_info "  sudo systemctl start $SERVICE_NAME"
-    log_info "  sudo systemctl start $FRONTEND_SERVICE_NAME"
-    echo ""
-fi
 
-################################################################################
-# Summary
-################################################################################
+    preflight
+    [ "$DO_BACKEND" = true ] && build_backend
+    [ "$DO_FRONTEND" = true ] && build_frontend
+    verify_outputs
+    restart_services
+    summary
+}
 
-log_info "========================================="
-log_success "  DEPLOYMENT COMPLETED SUCCESSFULLY!"
-log_info "========================================="
-echo ""
-
-# Show versions/commits
-cd "$BACKEND_DIR"
-BACKEND_COMMIT=$(git rev-parse --short HEAD)
-BACKEND_MSG=$(git log -1 --pretty=%B | head -n 1)
-
-cd "$FRONTEND_DIR"
-FRONTEND_COMMIT=$(git rev-parse --short HEAD)
-FRONTEND_MSG=$(git log -1 --pretty=%B | head -n 1)
-
-log_info "Backend:  $BACKEND_COMMIT - $BACKEND_MSG"
-log_info "Frontend: $FRONTEND_COMMIT - $FRONTEND_MSG"
-echo ""
-
-log_info "Useful commands:"
-log_info "  Backend logs:     tail -f $BACKEND_DIR/logs/SERVER.log"
-log_info "  Frontend logs:    tail -f /opt/immolux/logs/frontend.log"
-log_info "  Backend status:   sudo systemctl status $SERVICE_NAME"
-log_info "  Frontend status:  sudo systemctl status $FRONTEND_SERVICE_NAME"
-log_info "  Restart all:      sudo systemctl restart $SERVICE_NAME $FRONTEND_SERVICE_NAME"
-echo ""
-
-log_success "Deployment completed at $(date)"
+# The entire script is parsed before main() runs, so a `git pull` that
+# updates this very file mid-deploy cannot corrupt the running execution.
+main "$@"

@@ -68,6 +68,33 @@ type PropertyWithImagesDTO struct {
 	Images   []PropertyImageDTO `json:"images"`
 }
 
+// FacetBucketDTO is one selectable option in the property search, carrying the
+// number of published properties that remain if it is chosen. Parent is set only
+// for municipalities, naming the district they belong to.
+type FacetBucketDTO struct {
+	Value  string `json:"value"`
+	Count  int    `json:"count"`
+	Parent string `json:"parent,omitempty"`
+}
+
+// PropertyFacetsDTO is returned by GET /v1/api/properties/facets.
+//
+// Every dimension is counted with all the active filters applied EXCEPT its own.
+// That exclusion is the whole point: counted against itself, every option but the
+// chosen one reads zero, and the reader learns nothing about where else to look.
+// MinPrice and MaxPrice bound the properties matching everything but the price
+// filter, so the range a buyer is shown is the range that is actually on offer.
+type PropertyFacetsDTO struct {
+	Total          int              `json:"total"`
+	Districts      []FacetBucketDTO `json:"districts"`
+	Municipalities []FacetBucketDTO `json:"municipalities"`
+	Parishes       []FacetBucketDTO `json:"parishes"`
+	PropertyTypes  []FacetBucketDTO `json:"propertyTypes"`
+	Statuses       []FacetBucketDTO `json:"statuses"`
+	MinPrice       *float64         `json:"minPrice"`
+	MaxPrice       *float64         `json:"maxPrice"`
+}
+
 // LocationStatsDTO is returned by GET /v1/api/locations/stats
 type LocationStatsDTO struct {
 	District       string  `json:"district"`             // Canonical district name, e.g. "Lisboa"

@@ -20,6 +20,8 @@ func (s *Server) RegisterRoutes() {
 	s.Get("/locations/published", routes.GetPublishedLocations)
 
 	s.Get("/properties", routes.ListProperties)
+	// Registered ahead of /properties/:id, which would otherwise match "facets" as an id.
+	s.Get("/properties/facets", routes.ListPropertyFacets)
 	s.Get("/properties/:id", routes.GetProperty)
 	s.Get("/properties/:id/images", routes.GetPropertyImages)
 	s.Get("/images/:id", routes.GetImage)

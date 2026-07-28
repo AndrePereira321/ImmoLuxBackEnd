@@ -30,11 +30,78 @@ type PropertyFilters struct {
 	Status       *string
 	MinPrice     *float64
 	MaxPrice     *float64
+	Query        *string // Free text, matched against the title, description, address and place names
 	IsPublished  *bool
 	PublisherID  *models.RecordId
 	Limit        int
 	Offset       int
 	OrderBy      *string // Options: "price_asc", "price_desc", "created_asc", "created_desc", "popularity", "location", "status"
+}
+
+// Dimension names accepted by applyFilters' skip list.
+const (
+	dimDistrict     = "district"
+	dimMunicipality = "municipality"
+	dimParish       = "parish"
+	dimPropertyType = "propertyType"
+	dimStatus       = "status"
+	dimPrice        = "price"
+)
+
+// applyFilters narrows a query by every active filter except the dimensions named
+// in skip. Listing passes no skips; faceting skips the dimension it is counting,
+// so that each option reports what choosing it would actually yield.
+func (rep *PropertyRepository) applyFilters(query *client.PropertyQuery, filters PropertyFilters, skip ...string) *client.PropertyQuery {
+	skipped := make(map[string]bool, len(skip))
+	for _, dimension := range skip {
+		skipped[dimension] = true
+	}
+
+	if filters.District != nil && !skipped[dimDistrict] {
+		query = query.Where(property.DistrictEQ(*filters.District))
+	}
+	if filters.Municipality != nil && !skipped[dimMunicipality] {
+		query = query.Where(property.MunicipalityEQ(*filters.Municipality))
+	}
+	if filters.Parish != nil && !skipped[dimParish] {
+		query = query.Where(property.ParishEQ(*filters.Parish))
+	}
+	if filters.PropertyType != nil && !skipped[dimPropertyType] {
+		query = query.Where(property.PropertyTypeEQ(property.PropertyType(*filters.PropertyType)))
+	}
+	if filters.Status != nil && !skipped[dimStatus] {
+		query = query.Where(property.StatusEQ(property.Status(*filters.Status)))
+	}
+	if filters.MinPrice != nil && !skipped[dimPrice] {
+		query = query.Where(property.PriceGTE(*filters.MinPrice))
+	}
+	if filters.MaxPrice != nil && !skipped[dimPrice] {
+		query = query.Where(property.PriceLTE(*filters.MaxPrice))
+	}
+	if filters.Query != nil {
+		// Somebody typing "lousada" means the town, and typing "moradia" means the
+		// word in the title: one box has to reach both, so it reaches every text
+		// column the property owns.
+		term := strings.TrimSpace(*filters.Query)
+		if term != "" {
+			query = query.Where(property.Or(
+				property.TitleContainsFold(term),
+				property.DescriptionContainsFold(term),
+				property.AddressContainsFold(term),
+				property.DistrictContainsFold(term),
+				property.MunicipalityContainsFold(term),
+				property.ParishContainsFold(term),
+			))
+		}
+	}
+	if filters.IsPublished != nil {
+		query = query.Where(property.IsPublishedEQ(*filters.IsPublished))
+	}
+	if filters.PublisherID != nil {
+		query = query.Where(property.PublisherIDEQ(int(*filters.PublisherID)))
+	}
+
+	return query
 }
 
 func (rep *PropertyRepository) CreateProperty(ctx context.Context, tx *client.Tx, propertyDTO *models.PropertyDTO) (models.RecordId, error) {
@@ -280,35 +347,7 @@ func (rep *PropertyRepository) DeleteProperty(ctx context.Context, tx *client.Tx
 }
 
 func (rep *PropertyRepository) ListProperties(ctx context.Context, filters PropertyFilters) ([]models.PropertyDTO, int, error) {
-	query := rep.db.client.Property.Query()
-
-	if filters.District != nil {
-		query = query.Where(property.DistrictEQ(*filters.District))
-	}
-	if filters.Municipality != nil {
-		query = query.Where(property.MunicipalityEQ(*filters.Municipality))
-	}
-	if filters.Parish != nil {
-		query = query.Where(property.ParishEQ(*filters.Parish))
-	}
-	if filters.PropertyType != nil {
-		query = query.Where(property.PropertyTypeEQ(property.PropertyType(*filters.PropertyType)))
-	}
-	if filters.Status != nil {
-		query = query.Where(property.StatusEQ(property.Status(*filters.Status)))
-	}
-	if filters.MinPrice != nil {
-		query = query.Where(property.PriceGTE(*filters.MinPrice))
-	}
-	if filters.MaxPrice != nil {
-		query = query.Where(property.PriceLTE(*filters.MaxPrice))
-	}
-	if filters.IsPublished != nil {
-		query = query.Where(property.IsPublishedEQ(*filters.IsPublished))
-	}
-	if filters.PublisherID != nil {
-		query = query.Where(property.PublisherIDEQ(int(*filters.PublisherID)))
-	}
+	query := rep.applyFilters(rep.db.client.Property.Query(), filters)
 
 	total, err := query.Count(ctx)
 	if err != nil {
@@ -414,6 +453,132 @@ func (rep *PropertyRepository) ListProperties(ctx context.Context, filters Prope
 	}
 
 	return dtos, total, nil
+}
+
+// GetPropertyFacets counts, per dimension, what each remaining option would yield
+// under the current filters. It is what lets the search offer only choices that
+// lead somewhere: an option absent from these buckets has nothing behind it.
+func (rep *PropertyRepository) GetPropertyFacets(ctx context.Context, filters PropertyFilters) (*models.PropertyFacetsDTO, error) {
+	facets := &models.PropertyFacetsDTO{
+		Districts:      []models.FacetBucketDTO{},
+		Municipalities: []models.FacetBucketDTO{},
+		Parishes:       []models.FacetBucketDTO{},
+		PropertyTypes:  []models.FacetBucketDTO{},
+		Statuses:       []models.FacetBucketDTO{},
+	}
+
+	total, err := rep.applyFilters(rep.db.client.Property.Query(), filters).Count(ctx)
+	if err != nil {
+		return nil, server_error.Wrap("PROPERTY_FACETS", "failed to count matching properties", err)
+	}
+	facets.Total = total
+
+	// Each dimension scans into its own struct: Ent matches result columns to struct
+	// fields by name, so the column being grouped has to be named at compile time.
+
+	// A municipality only exists inside its district, so counting districts has to
+	// let go of the narrower location filters too — otherwise picking Lousada would
+	// report every other district as empty, which is true only of that selection.
+	var districts []struct {
+		District string `json:"district"`
+		Count    int    `json:"count"`
+	}
+	if err := rep.applyFilters(rep.db.client.Property.Query(), filters, dimDistrict, dimMunicipality, dimParish).
+		GroupBy(property.FieldDistrict).Aggregate(client.Count()).Scan(ctx, &districts); err != nil {
+		return nil, server_error.Wrap("PROPERTY_FACETS", "failed to count properties by district", err)
+	}
+	for _, row := range districts {
+		facets.Districts = append(facets.Districts, models.FacetBucketDTO{Value: row.District, Count: row.Count})
+	}
+
+	var municipalities []struct {
+		Municipality string `json:"municipality"`
+		District     string `json:"district"`
+		Count        int    `json:"count"`
+	}
+	if err := rep.applyFilters(rep.db.client.Property.Query(), filters, dimMunicipality, dimParish).
+		GroupBy(property.FieldMunicipality, property.FieldDistrict).Aggregate(client.Count()).Scan(ctx, &municipalities); err != nil {
+		return nil, server_error.Wrap("PROPERTY_FACETS", "failed to count properties by municipality", err)
+	}
+	for _, row := range municipalities {
+		facets.Municipalities = append(facets.Municipalities,
+			models.FacetBucketDTO{Value: row.Municipality, Parent: row.District, Count: row.Count})
+	}
+
+	// Parish is optional on a property. Grouping without excluding the unset ones
+	// yields a NULL bucket, which is neither scannable nor a choice anyone can make.
+	var parishes []struct {
+		Parish string `json:"parish"`
+		Count  int    `json:"count"`
+	}
+	if err := rep.applyFilters(rep.db.client.Property.Query(), filters, dimParish).
+		Where(property.ParishNotNil(), property.ParishNEQ("")).
+		GroupBy(property.FieldParish).Aggregate(client.Count()).Scan(ctx, &parishes); err != nil {
+		return nil, server_error.Wrap("PROPERTY_FACETS", "failed to count properties by parish", err)
+	}
+	for _, row := range parishes {
+		facets.Parishes = append(facets.Parishes, models.FacetBucketDTO{Value: row.Parish, Count: row.Count})
+	}
+
+	var propertyTypes []struct {
+		PropertyType string `json:"property_type"`
+		Count        int    `json:"count"`
+	}
+	if err := rep.applyFilters(rep.db.client.Property.Query(), filters, dimPropertyType).
+		GroupBy(property.FieldPropertyType).Aggregate(client.Count()).Scan(ctx, &propertyTypes); err != nil {
+		return nil, server_error.Wrap("PROPERTY_FACETS", "failed to count properties by type", err)
+	}
+	for _, row := range propertyTypes {
+		facets.PropertyTypes = append(facets.PropertyTypes, models.FacetBucketDTO{Value: row.PropertyType, Count: row.Count})
+	}
+
+	var statuses []struct {
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+	}
+	if err := rep.applyFilters(rep.db.client.Property.Query(), filters, dimStatus).
+		GroupBy(property.FieldStatus).Aggregate(client.Count()).Scan(ctx, &statuses); err != nil {
+		return nil, server_error.Wrap("PROPERTY_FACETS", "failed to count properties by status", err)
+	}
+	for _, row := range statuses {
+		facets.Statuses = append(facets.Statuses, models.FacetBucketDTO{Value: row.Status, Count: row.Count})
+	}
+
+	sortBuckets(facets.Districts)
+	sortBuckets(facets.Municipalities)
+	sortBuckets(facets.Parishes)
+	sortBuckets(facets.PropertyTypes)
+	sortBuckets(facets.Statuses)
+
+	// Bounds ignore the price filter itself, so the range shown stays the range on
+	// offer rather than collapsing onto whatever the buyer last typed.
+	var bounds []struct {
+		Min *float64 `json:"min"`
+		Max *float64 `json:"max"`
+	}
+	err = rep.applyFilters(rep.db.client.Property.Query(), filters, dimPrice).
+		Aggregate(client.Min(property.FieldPrice), client.Max(property.FieldPrice)).
+		Scan(ctx, &bounds)
+	if err != nil {
+		return nil, server_error.Wrap("PROPERTY_FACETS", "failed to compute price bounds", err)
+	}
+	if len(bounds) > 0 {
+		facets.MinPrice = bounds[0].Min
+		facets.MaxPrice = bounds[0].Max
+	}
+
+	return facets, nil
+}
+
+// sortBuckets puts the fullest option first, so the rail reads as an inventory
+// ordered by what there is most of, with ties settled alphabetically for stability.
+func sortBuckets(buckets []models.FacetBucketDTO) {
+	sort.Slice(buckets, func(i, j int) bool {
+		if buckets[i].Count != buckets[j].Count {
+			return buckets[i].Count > buckets[j].Count
+		}
+		return buckets[i].Value < buckets[j].Value
+	})
 }
 
 func (rep *PropertyRepository) PublishProperty(ctx context.Context, tx *client.Tx, propertyId models.RecordId) error {

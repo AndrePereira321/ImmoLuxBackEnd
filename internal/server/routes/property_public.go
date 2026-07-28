@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"immo-lux/internal/database"
 	"immo-lux/internal/models"
@@ -39,24 +40,12 @@ func GetProperty(ctx *RouteContext) error {
 	return ctx.RespondData(property)
 }
 
-func ListProperties(ctx *RouteContext) error {
-	limit := 20
-	if limitStr := ctx.Ctx().Query("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil {
-			limit = l
-		}
-	}
-	offset := 0
-	if offsetStr := ctx.Ctx().Query("offset"); offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil {
-			offset = o
-		}
-	}
-
-	filters := database.PropertyFilters{
-		Limit:  limit,
-		Offset: offset,
-	}
+// publicPropertyFilters reads the search query string. The listing and the facet
+// counts must agree on what is being asked, so both read it through here.
+// IsPublished is pinned on: an unpublished property is not public inventory,
+// whatever the caller passes.
+func publicPropertyFilters(ctx *RouteContext) database.PropertyFilters {
+	filters := database.PropertyFilters{}
 
 	if district := ctx.Ctx().Query("district"); district != "" {
 		filters.District = &district
@@ -83,12 +72,37 @@ func ListProperties(ctx *RouteContext) error {
 			filters.MaxPrice = &maxPrice
 		}
 	}
-	if orderBy := ctx.Ctx().Query("orderBy"); orderBy != "" {
-		filters.OrderBy = &orderBy
+	if search := strings.TrimSpace(ctx.Ctx().Query("q")); search != "" {
+		filters.Query = &search
 	}
 
 	isPublished := true
 	filters.IsPublished = &isPublished
+
+	return filters
+}
+
+func ListProperties(ctx *RouteContext) error {
+	limit := 20
+	if limitStr := ctx.Ctx().Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil {
+			limit = l
+		}
+	}
+	offset := 0
+	if offsetStr := ctx.Ctx().Query("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil {
+			offset = o
+		}
+	}
+
+	filters := publicPropertyFilters(ctx)
+	filters.Limit = limit
+	filters.Offset = offset
+
+	if orderBy := ctx.Ctx().Query("orderBy"); orderBy != "" {
+		filters.OrderBy = &orderBy
+	}
 
 	properties, total, err := ctx.Db().NewPropertyRepository().ListProperties(context.Background(), filters)
 	if err != nil {
@@ -100,4 +114,17 @@ func ListProperties(ctx *RouteContext) error {
 		Properties: properties,
 		Total:      total,
 	})
+}
+
+// ListPropertyFacets reports how many properties sit behind each remaining choice,
+// so the search can show its options with counts and withhold the ones that lead
+// nowhere.
+func ListPropertyFacets(ctx *RouteContext) error {
+	facets, err := ctx.Db().NewPropertyRepository().GetPropertyFacets(context.Background(), publicPropertyFilters(ctx))
+	if err != nil {
+		ctx.Logger().Error(fmt.Sprintf("Failed to compute property facets: %s", err.Error()))
+		return err
+	}
+
+	return ctx.RespondData(facets)
 }
