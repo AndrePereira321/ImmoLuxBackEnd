@@ -1,14 +1,10 @@
 package routes
 
 import (
-	"context"
-	"fmt"
 	"strconv"
 
 	"immo-lux/internal/database"
-	"immo-lux/internal/database/ent/client"
 	"immo-lux/internal/models"
-	"immo-lux/internal/server_error"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -84,6 +80,105 @@ type UpdatePropertyPayload struct {
 	Contacts       []ContactPayload `json:"contacts"`
 }
 
+func (p *ContactPayload) toDTO() models.ContactDTO {
+	dto := models.ContactDTO{
+		Name:  p.Name,
+		Email: p.Email,
+		Phone: p.Phone,
+		Notes: p.Notes,
+	}
+	if p.ID != nil {
+		id := models.RecordId(*p.ID)
+		dto.ID = &id
+	}
+	return dto
+}
+
+func contactPayloadsToDTOs(payloads []ContactPayload) []models.ContactDTO {
+	contacts := make([]models.ContactDTO, len(payloads))
+	for i, payload := range payloads {
+		contacts[i] = payload.toDTO()
+	}
+	return contacts
+}
+
+// existingContactIds keeps only the contacts referenced by ID: property updates
+// link existing contacts and ignore inline new ones.
+func existingContactIds(payloads []ContactPayload) []models.RecordId {
+	var ids []models.RecordId
+	for _, payload := range payloads {
+		if payload.ID != nil {
+			ids = append(ids, models.RecordId(*payload.ID))
+		}
+	}
+	return ids
+}
+
+func (p *CreatePropertyPayload) toDTO() *models.PropertyDTO {
+	return &models.PropertyDTO{
+		Title:          &p.Title,
+		Description:    &p.Description,
+		PropertyType:   &p.PropertyType,
+		Price:          &p.Price,
+		Status:         &p.Status,
+		Address:        &p.Address,
+		District:       &p.District,
+		Municipality:   &p.Municipality,
+		Parish:         p.Parish,
+		PostalCode:     p.PostalCode,
+		Country:        &p.Country,
+		Latitude:       p.Latitude,
+		Longitude:      p.Longitude,
+		Bedrooms:       p.Bedrooms,
+		Bathrooms:      p.Bathrooms,
+		AreaSqm:        p.AreaSqm,
+		LandAreaSqm:    p.LandAreaSqm,
+		YearBuilt:      p.YearBuilt,
+		Floor:          p.Floor,
+		TotalFloors:    p.TotalFloors,
+		ParkingSpaces:  p.ParkingSpaces,
+		HasGarage:      &p.HasGarage,
+		HasGarden:      &p.HasGarden,
+		HasPool:        &p.HasPool,
+		HasElevator:    &p.HasElevator,
+		EnergyRating:   p.EnergyRating,
+		VirtualTourURL: p.VirtualTourURL,
+	}
+}
+
+func (p *UpdatePropertyPayload) toDTO() *models.PropertyDTO {
+	return &models.PropertyDTO{
+		Title:          p.Title,
+		Description:    p.Description,
+		PropertyType:   p.PropertyType,
+		Price:          p.Price,
+		Status:         p.Status,
+		IsPublished:    p.IsPublished,
+		Address:        p.Address,
+		District:       p.District,
+		Municipality:   p.Municipality,
+		Parish:         p.Parish,
+		PostalCode:     p.PostalCode,
+		Country:        p.Country,
+		Latitude:       p.Latitude,
+		Longitude:      p.Longitude,
+		Bedrooms:       p.Bedrooms,
+		Bathrooms:      p.Bathrooms,
+		AreaSqm:        p.AreaSqm,
+		LandAreaSqm:    p.LandAreaSqm,
+		YearBuilt:      p.YearBuilt,
+		Floor:          p.Floor,
+		TotalFloors:    p.TotalFloors,
+		ParkingSpaces:  p.ParkingSpaces,
+		HasGarage:      p.HasGarage,
+		HasGarden:      p.HasGarden,
+		HasPool:        p.HasPool,
+		HasElevator:    p.HasElevator,
+		EnergyRating:   p.EnergyRating,
+		VirtualTourURL: p.VirtualTourURL,
+	}
+}
+
 func CreateProperty(ctx *RouteContext) error {
 	payload := &CreatePropertyPayload{}
 	if err := ctx.ReadBody(&payload); err != nil {
@@ -95,104 +190,13 @@ func CreateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	if len(payload.Contacts) == 0 {
-		return ctx.BadRequest("At least one contact is required")
-	}
-
-	var contactIDs []models.RecordId
-	var propertyId models.RecordId
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		for _, contactPayload := range payload.Contacts {
-			if contactPayload.ID != nil {
-				contactId := models.RecordId(*contactPayload.ID)
-
-				existingContact, err := ctx.Db().NewContactRepository().GetContactById(txCtx, contactId)
-				if err != nil {
-					return err
-				}
-
-				if *existingContact.UserID != userId {
-					return server_error.New("CONTACT_ACCESS_DENIED", "You can only use your own contacts")
-				}
-
-				contactIDs = append(contactIDs, contactId)
-			} else {
-				if contactPayload.Name == nil || contactPayload.Email == nil || contactPayload.Phone == nil {
-					return server_error.New("CONTACT_VALIDATION", "Contact name, email, and phone are required")
-				}
-
-				contactDTO := &models.ContactDTO{
-					UserID: &userId,
-					Name:   contactPayload.Name,
-					Email:  contactPayload.Email,
-					Phone:  contactPayload.Phone,
-					Notes:  contactPayload.Notes,
-				}
-
-				id, err := ctx.Db().NewContactRepository().CreateContact(txCtx, tx, contactDTO)
-				if err != nil {
-					return err
-				}
-				contactIDs = append(contactIDs, id)
-			}
-		}
-
-		isPublished := false
-		propertyDTO := &models.PropertyDTO{
-			Title:          &payload.Title,
-			Description:    &payload.Description,
-			PropertyType:   &payload.PropertyType,
-			Price:          &payload.Price,
-			Status:         &payload.Status,
-			IsPublished:    &isPublished,
-			Address:        &payload.Address,
-			District:       &payload.District,
-			Municipality:   &payload.Municipality,
-			Parish:         payload.Parish,
-			PostalCode:     payload.PostalCode,
-			Country:        &payload.Country,
-			Latitude:       payload.Latitude,
-			Longitude:      payload.Longitude,
-			Bedrooms:       payload.Bedrooms,
-			Bathrooms:      payload.Bathrooms,
-			AreaSqm:        payload.AreaSqm,
-			LandAreaSqm:    payload.LandAreaSqm,
-			YearBuilt:      payload.YearBuilt,
-			Floor:          payload.Floor,
-			TotalFloors:    payload.TotalFloors,
-			ParkingSpaces:  payload.ParkingSpaces,
-			HasGarage:      &payload.HasGarage,
-			HasGarden:      &payload.HasGarden,
-			HasPool:        &payload.HasPool,
-			HasElevator:    &payload.HasElevator,
-			EnergyRating:   payload.EnergyRating,
-			VirtualTourURL: payload.VirtualTourURL,
-			ContactIDs:     contactIDs,
-			PublisherID:    &userId,
-		}
-
-		id, err := ctx.Db().NewPropertyRepository().CreateProperty(txCtx, tx, propertyDTO)
-		if err != nil {
-			return err
-		}
-		propertyId = id
-		return nil
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to create property: %s", err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Property created by user %d: %d", userId, propertyId))
-
-	createdProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
+	created, err := ctx.Db().NewPropertyRepository().CreateProperty(
+		ctx.RequestContext(), userId, payload.toDTO(), contactPayloadsToDTOs(payload.Contacts))
 	if err != nil {
 		return err
 	}
 
-	return ctx.RespondData(createdProperty)
+	return ctx.RespondData(created)
 }
 
 func ListMyProperties(ctx *RouteContext) error {
@@ -224,9 +228,8 @@ func ListMyProperties(ctx *RouteContext) error {
 		filters.OrderBy = &orderBy
 	}
 
-	properties, total, err := ctx.Db().NewPropertyRepository().ListProperties(context.Background(), filters)
+	properties, total, err := ctx.Db().NewPropertyRepository().ListProperties(ctx.RequestContext(), filters)
 	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to list user properties: %s", err.Error()))
 		return err
 	}
 
@@ -247,98 +250,18 @@ func UpdateProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
-	if err != nil {
-		if server_error.IsServerError(err, "PROPERTY_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "PROPERTY_NOT_FOUND", "Property not found")
-		}
-		return err
-	}
-
-	if *existingProperty.PublisherID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only update your own properties")
-	}
-
 	payload := &UpdatePropertyPayload{}
 	if err := ctx.ReadBody(&payload); err != nil {
 		return err
 	}
 
-	var contactIDs []models.RecordId
-	if len(payload.Contacts) > 0 {
-		for _, contactPayload := range payload.Contacts {
-			if contactPayload.ID != nil {
-				contactId := models.RecordId(*contactPayload.ID)
-				existingContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
-				if err != nil {
-					return ctx.BadRequest("Invalid contact ID")
-				}
-				if *existingContact.UserID != userId {
-					return ctx.RespondError(fiber.StatusForbidden, "CONTACT_ACCESS_DENIED", "You can only use your own contacts")
-				}
-				contactIDs = append(contactIDs, contactId)
-			}
-		}
-	}
-
-	propertyDTO := &models.PropertyDTO{
-		Title:          payload.Title,
-		Description:    payload.Description,
-		PropertyType:   payload.PropertyType,
-		Price:          payload.Price,
-		Status:         payload.Status,
-		IsPublished:    payload.IsPublished,
-		Address:        payload.Address,
-		District:       payload.District,
-		Municipality:   payload.Municipality,
-		Parish:         payload.Parish,
-		PostalCode:     payload.PostalCode,
-		Country:        payload.Country,
-		Latitude:       payload.Latitude,
-		Longitude:      payload.Longitude,
-		Bedrooms:       payload.Bedrooms,
-		Bathrooms:      payload.Bathrooms,
-		AreaSqm:        payload.AreaSqm,
-		LandAreaSqm:    payload.LandAreaSqm,
-		YearBuilt:      payload.YearBuilt,
-		Floor:          payload.Floor,
-		TotalFloors:    payload.TotalFloors,
-		ParkingSpaces:  payload.ParkingSpaces,
-		HasGarage:      payload.HasGarage,
-		HasGarden:      payload.HasGarden,
-		HasPool:        payload.HasPool,
-		HasElevator:    payload.HasElevator,
-		EnergyRating:   payload.EnergyRating,
-		VirtualTourURL: payload.VirtualTourURL,
-	}
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		if err := ctx.Db().NewPropertyRepository().UpdateProperty(txCtx, tx, propertyId, propertyDTO); err != nil {
-			return err
-		}
-
-		if len(contactIDs) > 0 {
-			if err := ctx.Db().NewPropertyRepository().UpdatePropertyContacts(txCtx, tx, propertyId, contactIDs); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to update property %d: %s", propertyId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Property updated by user %d: %d", userId, propertyId))
-
-	updatedProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
+	updated, err := ctx.Db().NewPropertyRepository().UpdateProperty(
+		ctx.RequestContext(), userId, propertyId, payload.toDTO(), existingContactIds(payload.Contacts))
 	if err != nil {
 		return err
 	}
 
-	return ctx.RespondData(updatedProperty)
+	return ctx.RespondData(updated)
 }
 
 func DeleteProperty(ctx *RouteContext) error {
@@ -352,31 +275,9 @@ func DeleteProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
-	if err != nil {
-		if server_error.IsServerError(err, "PROPERTY_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "PROPERTY_NOT_FOUND", "Property not found")
-		}
+	if err := ctx.Db().NewPropertyRepository().DeleteProperty(ctx.RequestContext(), userId, propertyId); err != nil {
 		return err
 	}
-
-	if *existingProperty.PublisherID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only delete your own properties")
-	}
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		if err := ctx.Db().NewPropertyImageRepository().DeleteImagesByPropertyId(txCtx, tx, propertyId); err != nil {
-			return err
-		}
-		return ctx.Db().NewPropertyRepository().DeleteProperty(txCtx, tx, propertyId)
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to delete property %d: %s", propertyId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Property deleted by user %d: %d", userId, propertyId))
 
 	return ctx.RespondData(&fiber.Map{
 		"success": true,
@@ -395,28 +296,9 @@ func PublishProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
-	if err != nil {
-		if server_error.IsServerError(err, "PROPERTY_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "PROPERTY_NOT_FOUND", "Property not found")
-		}
+	if err := ctx.Db().NewPropertyRepository().PublishProperty(ctx.RequestContext(), userId, propertyId); err != nil {
 		return err
 	}
-
-	if *existingProperty.PublisherID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only publish your own properties")
-	}
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		return ctx.Db().NewPropertyRepository().PublishProperty(txCtx, tx, propertyId)
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to publish property %d: %s", propertyId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Property published by user %d: %d", userId, propertyId))
 
 	return ctx.RespondData(&fiber.Map{
 		"success": true,
@@ -435,28 +317,9 @@ func UnpublishProperty(ctx *RouteContext) error {
 		return err
 	}
 
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
-	if err != nil {
-		if server_error.IsServerError(err, "PROPERTY_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "PROPERTY_NOT_FOUND", "Property not found")
-		}
+	if err := ctx.Db().NewPropertyRepository().UnpublishProperty(ctx.RequestContext(), userId, propertyId); err != nil {
 		return err
 	}
-
-	if *existingProperty.PublisherID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only unpublish your own properties")
-	}
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		return ctx.Db().NewPropertyRepository().UnpublishProperty(txCtx, tx, propertyId)
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to unpublish property %d: %s", propertyId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Property unpublished by user %d: %d", userId, propertyId))
 
 	return ctx.RespondData(&fiber.Map{
 		"success": true,

@@ -104,104 +104,141 @@ func (rep *PropertyRepository) applyFilters(query *client.PropertyQuery, filters
 	return query
 }
 
-func (rep *PropertyRepository) CreateProperty(ctx context.Context, tx *client.Tx, propertyDTO *models.PropertyDTO) (models.RecordId, error) {
-	if err := rep.validatePropertyInput(propertyDTO); err != nil {
-		return models.InvalidRecordId, err
+// ensureOwned verifies the property exists and belongs to ownerId, translating
+// the outcome into not-found / forbidden kinds. It runs on tx so the ownership
+// it certifies holds for the rest of the transaction.
+func (rep *PropertyRepository) ensureOwned(ctx context.Context, tx *client.Tx, ownerId, propertyId models.RecordId) error {
+	if !propertyId.IsValid() {
+		return server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
 	}
 
-	rep.db.Logger().Debug(fmt.Sprintf("Creating property: %s", *propertyDTO.Title))
-
-	builder := tx.Property.Create().
-		SetTitle(*propertyDTO.Title).
-		SetDescription(*propertyDTO.Description).
-		SetPropertyType(property.PropertyType(*propertyDTO.PropertyType)).
-		SetPrice(*propertyDTO.Price).
-		SetStatus(property.Status(*propertyDTO.Status)).
-		SetAddress(*propertyDTO.Address).
-		SetDistrict(*propertyDTO.District).
-		SetMunicipality(*propertyDTO.Municipality).
-		SetCountry(*propertyDTO.Country).
-		SetPublisherID(int(*propertyDTO.PublisherID))
-
-	if propertyDTO.IsPublished != nil {
-		builder.SetIsPublished(*propertyDTO.IsPublished)
-	}
-	if propertyDTO.Parish != nil {
-		builder.SetParish(*propertyDTO.Parish)
-	}
-	if propertyDTO.PostalCode != nil {
-		builder.SetPostalCode(*propertyDTO.PostalCode)
-	}
-	if propertyDTO.Latitude != nil {
-		builder.SetLatitude(*propertyDTO.Latitude)
-	}
-	if propertyDTO.Longitude != nil {
-		builder.SetLongitude(*propertyDTO.Longitude)
-	}
-	if propertyDTO.Bedrooms != nil {
-		builder.SetBedrooms(*propertyDTO.Bedrooms)
-	}
-	if propertyDTO.Bathrooms != nil {
-		builder.SetBathrooms(*propertyDTO.Bathrooms)
-	}
-	if propertyDTO.AreaSqm != nil {
-		builder.SetAreaSqm(*propertyDTO.AreaSqm)
-	}
-	if propertyDTO.LandAreaSqm != nil {
-		builder.SetLandAreaSqm(*propertyDTO.LandAreaSqm)
-	}
-	if propertyDTO.YearBuilt != nil {
-		builder.SetYearBuilt(*propertyDTO.YearBuilt)
-	}
-	if propertyDTO.Floor != nil {
-		builder.SetFloor(*propertyDTO.Floor)
-	}
-	if propertyDTO.TotalFloors != nil {
-		builder.SetTotalFloors(*propertyDTO.TotalFloors)
-	}
-	if propertyDTO.ParkingSpaces != nil {
-		builder.SetParkingSpaces(*propertyDTO.ParkingSpaces)
-	}
-	if propertyDTO.HasGarage != nil {
-		builder.SetHasGarage(*propertyDTO.HasGarage)
-	}
-	if propertyDTO.HasGarden != nil {
-		builder.SetHasGarden(*propertyDTO.HasGarden)
-	}
-	if propertyDTO.HasPool != nil {
-		builder.SetHasPool(*propertyDTO.HasPool)
-	}
-	if propertyDTO.HasElevator != nil {
-		builder.SetHasElevator(*propertyDTO.HasElevator)
-	}
-	if propertyDTO.EnergyRating != nil {
-		builder.SetEnergyRating(property.EnergyRating(*propertyDTO.EnergyRating))
-	}
-	if propertyDTO.VirtualTourURL != nil {
-		builder.SetVirtualTourURL(*propertyDTO.VirtualTourURL)
-	}
-
-	if len(propertyDTO.ContactIDs) > 0 {
-		contactIDs := make([]int, len(propertyDTO.ContactIDs))
-		for i, contactID := range propertyDTO.ContactIDs {
-			contactIDs[i] = int(contactID)
-		}
-		builder.AddContactIDs(contactIDs...)
-	}
-
-	createdProperty, err := builder.Save(ctx)
+	owned, err := tx.Property.Query().
+		Where(property.IDEQ(int(propertyId)), property.PublisherIDEQ(int(ownerId))).
+		Exist(ctx)
 	if err != nil {
-		rep.db.Logger().Error(fmt.Sprintf("Failed to create property [%s]: %s", *propertyDTO.Title, err.Error()))
-		return models.InvalidRecordId, server_error.Wrap("PROPERTY_INSERT", "failed to insert property", err)
+		return server_error.Wrap("PROPERTY_QUERY", "failed to check property ownership", err)
+	}
+	if owned {
+		return nil
 	}
 
-	rep.db.Logger().Info(fmt.Sprintf("Property created successfully: %d", createdProperty.ID))
-	return models.RecordId(createdProperty.ID), nil
+	return rep.ownershipVerdict(ctx, func(c context.Context) (bool, error) {
+		return tx.Property.Query().Where(property.IDEQ(int(propertyId))).Exist(c)
+	})
+}
+
+// ownershipVerdict wraps the shared classifier with the property store's codes.
+func (rep *PropertyRepository) ownershipVerdict(ctx context.Context, exists func(context.Context) (bool, error)) error {
+	return ownershipVerdict(ctx, exists,
+		"PROPERTY_QUERY",
+		server_error.NotFound("PROPERTY_NOT_FOUND", "property not found"),
+		server_error.Forbidden("ACCESS_DENIED", "you can only modify your own properties"),
+	)
+}
+
+// resolveContacts turns the caller's mixed list (existing IDs and new entries)
+// into contact IDs, verifying every existing contact belongs to ownerId and
+// creating the new ones under ownerId.
+func (rep *PropertyRepository) resolveContacts(ctx context.Context, tx *client.Tx, ownerId models.RecordId, contacts []models.ContactDTO) ([]models.RecordId, error) {
+	contactRepo := NewContactRepository(rep.db)
+	contactIDs := make([]models.RecordId, 0, len(contacts))
+	var existingIDs []models.RecordId
+	for _, contactDTO := range contacts {
+		if contactDTO.ID != nil {
+			existingIDs = append(existingIDs, *contactDTO.ID)
+			contactIDs = append(contactIDs, *contactDTO.ID)
+			continue
+		}
+
+		created, err := contactRepo.createContact(ctx, tx, ownerId, &contactDTO)
+		if err != nil {
+			return nil, err
+		}
+		contactIDs = append(contactIDs, models.RecordId(created.ID))
+	}
+
+	if err := contactRepo.ensureAllOwned(ctx, tx, ownerId, existingIDs); err != nil {
+		return nil, err
+	}
+	return contactIDs, nil
+}
+
+// CreateProperty runs the whole property-intake operation for ownerId: contacts
+// are verified or created, the property is inserted unpublished, and the fresh
+// record is read back.
+func (rep *PropertyRepository) CreateProperty(ctx context.Context, ownerId models.RecordId, propertyDTO *models.PropertyDTO, contacts []models.ContactDTO) (*models.PropertyDTO, error) {
+	var propertyId models.RecordId
+	err := rep.db.WithTransaction(ctx, func(txCtx context.Context, tx *client.Tx) error {
+		contactIDs, err := rep.resolveContacts(txCtx, tx, ownerId, contacts)
+		if err != nil {
+			return err
+		}
+		propertyDTO.ContactIDs = contactIDs
+
+		if err := rep.validatePropertyInput(propertyDTO); err != nil {
+			return err
+		}
+
+		rep.db.Logger().Debug(fmt.Sprintf("Creating property: %s", *propertyDTO.Title))
+
+		builder := tx.Property.Create().
+			SetTitle(*propertyDTO.Title).
+			SetDescription(*propertyDTO.Description).
+			SetPropertyType(property.PropertyType(*propertyDTO.PropertyType)).
+			SetPrice(*propertyDTO.Price).
+			SetStatus(property.Status(*propertyDTO.Status)).
+			SetAddress(*propertyDTO.Address).
+			SetDistrict(*propertyDTO.District).
+			SetMunicipality(*propertyDTO.Municipality).
+			SetCountry(*propertyDTO.Country).
+			SetPublisherID(int(ownerId)).
+			SetNillableParish(propertyDTO.Parish).
+			SetNillablePostalCode(propertyDTO.PostalCode).
+			SetNillableLatitude(propertyDTO.Latitude).
+			SetNillableLongitude(propertyDTO.Longitude).
+			SetNillableBedrooms(propertyDTO.Bedrooms).
+			SetNillableBathrooms(propertyDTO.Bathrooms).
+			SetNillableAreaSqm(propertyDTO.AreaSqm).
+			SetNillableLandAreaSqm(propertyDTO.LandAreaSqm).
+			SetNillableYearBuilt(propertyDTO.YearBuilt).
+			SetNillableFloor(propertyDTO.Floor).
+			SetNillableTotalFloors(propertyDTO.TotalFloors).
+			SetNillableParkingSpaces(propertyDTO.ParkingSpaces).
+			SetNillableHasGarage(propertyDTO.HasGarage).
+			SetNillableHasGarden(propertyDTO.HasGarden).
+			SetNillableHasPool(propertyDTO.HasPool).
+			SetNillableHasElevator(propertyDTO.HasElevator).
+			SetNillableEnergyRating((*property.EnergyRating)(propertyDTO.EnergyRating)).
+			SetNillableVirtualTourURL(propertyDTO.VirtualTourURL)
+
+		if len(propertyDTO.ContactIDs) > 0 {
+			contactIDs := make([]int, len(propertyDTO.ContactIDs))
+			for i, contactID := range propertyDTO.ContactIDs {
+				contactIDs[i] = int(contactID)
+			}
+			builder.AddContactIDs(contactIDs...)
+		}
+
+		createdProperty, err := builder.Save(txCtx)
+		if err != nil {
+			rep.db.Logger().Error(fmt.Sprintf("Failed to create property [%s]: %s", *propertyDTO.Title, err.Error()))
+			return server_error.Wrap("PROPERTY_INSERT", "failed to insert property", err)
+		}
+
+		propertyId = models.RecordId(createdProperty.ID)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	rep.db.Logger().Info(fmt.Sprintf("Property created successfully: %d", propertyId))
+	return rep.GetPropertyById(ctx, propertyId)
 }
 
 func (rep *PropertyRepository) GetPropertyById(ctx context.Context, propertyId models.RecordId) (*models.PropertyDTO, error) {
 	if !propertyId.IsValid() {
-		return nil, server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
+		return nil, server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
 	}
 
 	prop, err := rep.db.client.Property.Query().
@@ -211,7 +248,7 @@ func (rep *PropertyRepository) GetPropertyById(ctx context.Context, propertyId m
 
 	if err != nil {
 		if client.IsNotFound(err) {
-			return nil, server_error.New("PROPERTY_NOT_FOUND", "property not found")
+			return nil, server_error.NotFound("PROPERTY_NOT_FOUND", "property not found")
 		}
 		return nil, server_error.Wrap("PROPERTY_QUERY", "failed to query property", err)
 	}
@@ -219,131 +256,93 @@ func (rep *PropertyRepository) GetPropertyById(ctx context.Context, propertyId m
 	return rep.entToDTO(prop), nil
 }
 
-func (rep *PropertyRepository) UpdateProperty(ctx context.Context, tx *client.Tx, propertyId models.RecordId, propertyDTO *models.PropertyDTO) error {
-	if !propertyId.IsValid() {
-		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
-	}
-
-	rep.db.Logger().Debug(fmt.Sprintf("Updating property: %d", propertyId))
-
-	builder := tx.Property.UpdateOneID(int(propertyId))
-
-	if propertyDTO.Title != nil {
-		builder.SetTitle(*propertyDTO.Title)
-	}
-	if propertyDTO.Description != nil {
-		builder.SetDescription(*propertyDTO.Description)
-	}
-	if propertyDTO.PropertyType != nil {
-		builder.SetPropertyType(property.PropertyType(*propertyDTO.PropertyType))
-	}
-	if propertyDTO.Price != nil {
-		builder.SetPrice(*propertyDTO.Price)
-	}
-	if propertyDTO.Status != nil {
-		builder.SetStatus(property.Status(*propertyDTO.Status))
-	}
-	if propertyDTO.IsPublished != nil {
-		builder.SetIsPublished(*propertyDTO.IsPublished)
-	}
-	if propertyDTO.Address != nil {
-		builder.SetAddress(*propertyDTO.Address)
-	}
-	if propertyDTO.District != nil {
-		builder.SetDistrict(*propertyDTO.District)
-	}
-	if propertyDTO.Municipality != nil {
-		builder.SetMunicipality(*propertyDTO.Municipality)
-	}
-	if propertyDTO.Parish != nil {
-		builder.SetNillableParish(propertyDTO.Parish)
-	}
-	if propertyDTO.PostalCode != nil {
-		builder.SetNillablePostalCode(propertyDTO.PostalCode)
-	}
-	if propertyDTO.Country != nil {
-		builder.SetCountry(*propertyDTO.Country)
-	}
-	if propertyDTO.Latitude != nil {
-		builder.SetNillableLatitude(propertyDTO.Latitude)
-	}
-	if propertyDTO.Longitude != nil {
-		builder.SetNillableLongitude(propertyDTO.Longitude)
-	}
-	if propertyDTO.Bedrooms != nil {
-		builder.SetNillableBedrooms(propertyDTO.Bedrooms)
-	}
-	if propertyDTO.Bathrooms != nil {
-		builder.SetNillableBathrooms(propertyDTO.Bathrooms)
-	}
-	if propertyDTO.AreaSqm != nil {
-		builder.SetNillableAreaSqm(propertyDTO.AreaSqm)
-	}
-	if propertyDTO.LandAreaSqm != nil {
-		builder.SetNillableLandAreaSqm(propertyDTO.LandAreaSqm)
-	}
-	if propertyDTO.YearBuilt != nil {
-		builder.SetNillableYearBuilt(propertyDTO.YearBuilt)
-	}
-	if propertyDTO.Floor != nil {
-		builder.SetNillableFloor(propertyDTO.Floor)
-	}
-	if propertyDTO.TotalFloors != nil {
-		builder.SetNillableTotalFloors(propertyDTO.TotalFloors)
-	}
-	if propertyDTO.ParkingSpaces != nil {
-		builder.SetNillableParkingSpaces(propertyDTO.ParkingSpaces)
-	}
-	if propertyDTO.HasGarage != nil {
-		builder.SetHasGarage(*propertyDTO.HasGarage)
-	}
-	if propertyDTO.HasGarden != nil {
-		builder.SetHasGarden(*propertyDTO.HasGarden)
-	}
-	if propertyDTO.HasPool != nil {
-		builder.SetHasPool(*propertyDTO.HasPool)
-	}
-	if propertyDTO.HasElevator != nil {
-		builder.SetHasElevator(*propertyDTO.HasElevator)
-	}
-	if propertyDTO.EnergyRating != nil {
-		builder.SetNillableEnergyRating((*property.EnergyRating)(propertyDTO.EnergyRating))
-	}
-	if propertyDTO.VirtualTourURL != nil {
-		builder.SetNillableVirtualTourURL(propertyDTO.VirtualTourURL)
-	}
-
-	err := builder.Exec(ctx)
-	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("PROPERTY_NOT_FOUND", "property not found")
+// UpdateProperty applies the given field changes to a property ownerId owns and,
+// when contactIDs is non-empty, replaces the linked contacts after verifying
+// each one belongs to ownerId. Returns the updated record.
+func (rep *PropertyRepository) UpdateProperty(ctx context.Context, ownerId, propertyId models.RecordId, propertyDTO *models.PropertyDTO, contactIDs []models.RecordId) (*models.PropertyDTO, error) {
+	err := rep.db.WithTransaction(ctx, func(txCtx context.Context, tx *client.Tx) error {
+		if err := rep.ensureOwned(txCtx, tx, ownerId, propertyId); err != nil {
+			return err
 		}
-		rep.db.Logger().Error(fmt.Sprintf("Failed to update property [%d]: %s", propertyId, err.Error()))
-		return server_error.Wrap("PROPERTY_UPDATE", "failed to update property", err)
+
+		if err := NewContactRepository(rep.db).ensureAllOwned(txCtx, tx, ownerId, contactIDs); err != nil {
+			return err
+		}
+
+		rep.db.Logger().Debug(fmt.Sprintf("Updating property: %d", propertyId))
+
+		builder := tx.Property.UpdateOneID(int(propertyId)).
+			SetNillableTitle(propertyDTO.Title).
+			SetNillableDescription(propertyDTO.Description).
+			SetNillablePropertyType((*property.PropertyType)(propertyDTO.PropertyType)).
+			SetNillablePrice(propertyDTO.Price).
+			SetNillableStatus((*property.Status)(propertyDTO.Status)).
+			SetNillableIsPublished(propertyDTO.IsPublished).
+			SetNillableAddress(propertyDTO.Address).
+			SetNillableDistrict(propertyDTO.District).
+			SetNillableMunicipality(propertyDTO.Municipality).
+			SetNillableParish(propertyDTO.Parish).
+			SetNillablePostalCode(propertyDTO.PostalCode).
+			SetNillableCountry(propertyDTO.Country).
+			SetNillableLatitude(propertyDTO.Latitude).
+			SetNillableLongitude(propertyDTO.Longitude).
+			SetNillableBedrooms(propertyDTO.Bedrooms).
+			SetNillableBathrooms(propertyDTO.Bathrooms).
+			SetNillableAreaSqm(propertyDTO.AreaSqm).
+			SetNillableLandAreaSqm(propertyDTO.LandAreaSqm).
+			SetNillableYearBuilt(propertyDTO.YearBuilt).
+			SetNillableFloor(propertyDTO.Floor).
+			SetNillableTotalFloors(propertyDTO.TotalFloors).
+			SetNillableParkingSpaces(propertyDTO.ParkingSpaces).
+			SetNillableHasGarage(propertyDTO.HasGarage).
+			SetNillableHasGarden(propertyDTO.HasGarden).
+			SetNillableHasPool(propertyDTO.HasPool).
+			SetNillableHasElevator(propertyDTO.HasElevator).
+			SetNillableEnergyRating((*property.EnergyRating)(propertyDTO.EnergyRating)).
+			SetNillableVirtualTourURL(propertyDTO.VirtualTourURL)
+
+		if err := builder.Exec(txCtx); err != nil {
+			rep.db.Logger().Error(fmt.Sprintf("Failed to update property [%d]: %s", propertyId, err.Error()))
+			return server_error.Wrap("PROPERTY_UPDATE", "failed to update property", err)
+		}
+
+		if len(contactIDs) > 0 {
+			if err := rep.updateContacts(txCtx, tx, propertyId, contactIDs); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	rep.db.Logger().Info(fmt.Sprintf("Property updated successfully: %d", propertyId))
-	return nil
+	return rep.GetPropertyById(ctx, propertyId)
 }
 
-func (rep *PropertyRepository) DeleteProperty(ctx context.Context, tx *client.Tx, propertyId models.RecordId) error {
-	if !propertyId.IsValid() {
-		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
-	}
-
-	rep.db.Logger().Debug(fmt.Sprintf("Deleting property: %d", propertyId))
-
-	err := tx.Property.DeleteOneID(int(propertyId)).Exec(ctx)
-	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("PROPERTY_NOT_FOUND", "property not found")
+// DeleteProperty removes a property ownerId owns together with its images.
+func (rep *PropertyRepository) DeleteProperty(ctx context.Context, ownerId, propertyId models.RecordId) error {
+	return rep.db.WithTransaction(ctx, func(txCtx context.Context, tx *client.Tx) error {
+		if err := rep.ensureOwned(txCtx, tx, ownerId, propertyId); err != nil {
+			return err
 		}
-		rep.db.Logger().Error(fmt.Sprintf("Failed to delete property [%d]: %s", propertyId, err.Error()))
-		return server_error.Wrap("PROPERTY_DELETE", "failed to delete property", err)
-	}
 
-	rep.db.Logger().Info(fmt.Sprintf("Property deleted successfully: %d", propertyId))
-	return nil
+		rep.db.Logger().Debug(fmt.Sprintf("Deleting property: %d", propertyId))
+
+		if err := NewPropertyImageRepository(rep.db).deleteImagesByPropertyId(txCtx, tx, propertyId); err != nil {
+			return err
+		}
+
+		if err := tx.Property.DeleteOneID(int(propertyId)).Exec(txCtx); err != nil {
+			rep.db.Logger().Error(fmt.Sprintf("Failed to delete property [%d]: %s", propertyId, err.Error()))
+			return server_error.Wrap("PROPERTY_DELETE", "failed to delete property", err)
+		}
+
+		rep.db.Logger().Info(fmt.Sprintf("Property deleted successfully: %d", propertyId))
+		return nil
+	})
 }
 
 func (rep *PropertyRepository) ListProperties(ctx context.Context, filters PropertyFilters) ([]models.PropertyDTO, int, error) {
@@ -581,57 +580,56 @@ func sortBuckets(buckets []models.FacetBucketDTO) {
 	})
 }
 
-func (rep *PropertyRepository) PublishProperty(ctx context.Context, tx *client.Tx, propertyId models.RecordId) error {
+// PublishProperty marks a property ownerId owns as published, with one
+// owner-predicated statement; the probe runs only when nothing matched.
+func (rep *PropertyRepository) PublishProperty(ctx context.Context, ownerId, propertyId models.RecordId) error {
 	if !propertyId.IsValid() {
-		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
+		return server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
 	}
 
-	now := time.Now()
-	err := tx.Property.UpdateOneID(int(propertyId)).
+	updated, err := rep.db.client.Property.Update().
+		Where(property.IDEQ(int(propertyId)), property.PublisherIDEQ(int(ownerId))).
 		SetIsPublished(true).
-		SetPublishedAt(now).
-		Exec(ctx)
-
+		SetPublishedAt(time.Now()).
+		Save(ctx)
 	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("PROPERTY_NOT_FOUND", "property not found")
-		}
 		return server_error.Wrap("PROPERTY_PUBLISH", "failed to publish property", err)
+	}
+	if updated == 0 {
+		return rep.ownershipVerdict(ctx, func(c context.Context) (bool, error) {
+			return rep.db.client.Property.Query().Where(property.IDEQ(int(propertyId))).Exist(c)
+		})
 	}
 
 	rep.db.Logger().Info(fmt.Sprintf("Property published: %d", propertyId))
 	return nil
 }
 
-func (rep *PropertyRepository) UnpublishProperty(ctx context.Context, tx *client.Tx, propertyId models.RecordId) error {
+// UnpublishProperty takes a property ownerId owns off the public listing, with
+// one owner-predicated statement; the probe runs only when nothing matched.
+func (rep *PropertyRepository) UnpublishProperty(ctx context.Context, ownerId, propertyId models.RecordId) error {
 	if !propertyId.IsValid() {
-		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
+		return server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
 	}
 
-	err := tx.Property.UpdateOneID(int(propertyId)).
+	updated, err := rep.db.client.Property.Update().
+		Where(property.IDEQ(int(propertyId)), property.PublisherIDEQ(int(ownerId))).
 		SetIsPublished(false).
-		Exec(ctx)
-
+		Save(ctx)
 	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("PROPERTY_NOT_FOUND", "property not found")
-		}
 		return server_error.Wrap("PROPERTY_UNPUBLISH", "failed to unpublish property", err)
+	}
+	if updated == 0 {
+		return rep.ownershipVerdict(ctx, func(c context.Context) (bool, error) {
+			return rep.db.client.Property.Query().Where(property.IDEQ(int(propertyId))).Exist(c)
+		})
 	}
 
 	rep.db.Logger().Info(fmt.Sprintf("Property unpublished: %d", propertyId))
 	return nil
 }
 
-func (rep *PropertyRepository) UpdatePropertyContacts(ctx context.Context, tx *client.Tx, propertyId models.RecordId, contactIDs []models.RecordId) error {
-	if !propertyId.IsValid() {
-		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
-	}
-
-	if len(contactIDs) == 0 {
-		return server_error.New("PROPERTY_VALIDATION", "at least one contact is required")
-	}
-
+func (rep *PropertyRepository) updateContacts(ctx context.Context, tx *client.Tx, propertyId models.RecordId, contactIDs []models.RecordId) error {
 	intContactIDs := make([]int, len(contactIDs))
 	for i, contactID := range contactIDs {
 		intContactIDs[i] = int(contactID)
@@ -641,100 +639,94 @@ func (rep *PropertyRepository) UpdatePropertyContacts(ctx context.Context, tx *c
 		ClearContacts().
 		AddContactIDs(intContactIDs...).
 		Exec(ctx)
-
 	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("PROPERTY_NOT_FOUND", "property not found")
-		}
 		rep.db.Logger().Error(fmt.Sprintf("Failed to update property contacts [%d]: %s", propertyId, err.Error()))
 		return server_error.Wrap("PROPERTY_UPDATE_CONTACTS", "failed to update property contacts", err)
 	}
 
-	rep.db.Logger().Info(fmt.Sprintf("Property contacts updated successfully: %d", propertyId))
 	return nil
 }
 
-func (rep *PropertyRepository) IncrementViewCount(ctx context.Context, propertyId models.RecordId) error {
-	if !propertyId.IsValid() {
-		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
-	}
-
-	prop, err := rep.db.client.Property.Get(ctx, int(propertyId))
+// ViewProperty returns a public property and counts the view; the count is
+// best-effort and never fails the read.
+func (rep *PropertyRepository) ViewProperty(ctx context.Context, propertyId models.RecordId) (*models.PropertyDTO, error) {
+	propertyDTO, err := rep.GetPropertyById(ctx, propertyId)
 	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("PROPERTY_NOT_FOUND", "property not found")
-		}
-		return server_error.Wrap("PROPERTY_QUERY", "failed to query property", err)
+		return nil, err
 	}
 
-	err = rep.db.client.Property.UpdateOneID(int(propertyId)).
-		SetViewCount(prop.ViewCount + 1).
-		Exec(ctx)
+	if err := rep.incrementViewCount(ctx, propertyId); err != nil {
+		rep.db.Logger().Warn(fmt.Sprintf("Failed to increment view count for property %d: %s", propertyId, err.Error()))
+	}
 
+	return propertyDTO, nil
+}
+
+func (rep *PropertyRepository) incrementViewCount(ctx context.Context, propertyId models.RecordId) error {
+	_, err := rep.db.client.Property.Update().
+		Where(property.IDEQ(int(propertyId))).
+		AddViewCount(1).
+		Save(ctx)
 	if err != nil {
 		return server_error.Wrap("PROPERTY_UPDATE_VIEWS", "failed to increment view count", err)
 	}
-
 	return nil
 }
 
 func (rep *PropertyRepository) validatePropertyInput(propertyDTO *models.PropertyDTO) error {
 	if propertyDTO.Title == nil || *propertyDTO.Title == "" {
-		return server_error.New("PROPERTY_VALIDATION", "title is required")
+		return server_error.Invalid("PROPERTY_VALIDATION", "title is required")
 	}
 	if propertyDTO.Description == nil || *propertyDTO.Description == "" {
-		return server_error.New("PROPERTY_VALIDATION", "description is required")
+		return server_error.Invalid("PROPERTY_VALIDATION", "description is required")
 	}
 	if propertyDTO.PropertyType == nil || *propertyDTO.PropertyType == "" {
-		return server_error.New("PROPERTY_VALIDATION", "property type is required")
+		return server_error.Invalid("PROPERTY_VALIDATION", "property type is required")
 	}
 	if propertyDTO.Price == nil || *propertyDTO.Price <= 0 {
-		return server_error.New("PROPERTY_VALIDATION", "price must be greater than zero")
+		return server_error.Invalid("PROPERTY_VALIDATION", "price must be greater than zero")
 	}
 	if propertyDTO.Address == nil || *propertyDTO.Address == "" {
-		return server_error.New("PROPERTY_VALIDATION", "address is required")
+		return server_error.Invalid("PROPERTY_VALIDATION", "address is required")
 	}
 	if propertyDTO.District == nil || *propertyDTO.District == "" {
-		return server_error.New("PROPERTY_VALIDATION", "district is required")
+		return server_error.Invalid("PROPERTY_VALIDATION", "district is required")
 	}
 	if propertyDTO.Municipality == nil || *propertyDTO.Municipality == "" {
-		return server_error.New("PROPERTY_VALIDATION", "municipality is required")
+		return server_error.Invalid("PROPERTY_VALIDATION", "municipality is required")
 	}
 	if len(propertyDTO.ContactIDs) == 0 {
-		return server_error.New("PROPERTY_VALIDATION", "at least one contact is required")
+		return server_error.Invalid("PROPERTY_VALIDATION", "at least one contact is required")
 	}
 	for _, contactID := range propertyDTO.ContactIDs {
 		if !contactID.IsValid() {
-			return server_error.New("PROPERTY_VALIDATION", "invalid contact ID provided")
+			return server_error.Invalid("PROPERTY_VALIDATION", "invalid contact ID provided")
 		}
-	}
-	if propertyDTO.PublisherID == nil || !propertyDTO.PublisherID.IsValid() {
-		return server_error.New("PROPERTY_VALIDATION", "publisher ID is required")
 	}
 
 	validator, err := utils.GetLocationValidator()
 	if err != nil {
 		rep.db.Logger().Error(fmt.Sprintf("Failed to initialize location validator: %s", err.Error()))
-		return server_error.New("VALIDATION_ERROR", "failed to validate location")
+		return server_error.Invalid("VALIDATION_ERROR", "failed to validate location")
 	}
 
 	if !validator.ValidateDistrict(*propertyDTO.District) {
-		return server_error.New("INVALID_DISTRICT", fmt.Sprintf("district '%s' is not a valid Portuguese district", *propertyDTO.District))
+		return server_error.Invalid("INVALID_DISTRICT", fmt.Sprintf("district '%s' is not a valid Portuguese district", *propertyDTO.District))
 	}
 
 	if !validator.ValidateMunicipality(*propertyDTO.Municipality) {
-		return server_error.New("INVALID_MUNICIPALITY", fmt.Sprintf("municipality '%s' is not a valid Portuguese municipality", *propertyDTO.Municipality))
+		return server_error.Invalid("INVALID_MUNICIPALITY", fmt.Sprintf("municipality '%s' is not a valid Portuguese municipality", *propertyDTO.Municipality))
 	}
 
 	if propertyDTO.Parish != nil && *propertyDTO.Parish != "" {
 		if !validator.ValidateParish(*propertyDTO.Parish) {
-			return server_error.New("INVALID_PARISH", fmt.Sprintf("parish '%s' is not a valid Portuguese parish", *propertyDTO.Parish))
+			return server_error.Invalid("INVALID_PARISH", fmt.Sprintf("parish '%s' is not a valid Portuguese parish", *propertyDTO.Parish))
 		}
 	}
 
 	if propertyDTO.PostalCode != nil && *propertyDTO.PostalCode != "" {
 		if !validator.ValidatePostalCode(*propertyDTO.PostalCode) {
-			return server_error.New("INVALID_POSTAL_CODE", "postal code must be in format XXXX-XXX")
+			return server_error.Invalid("INVALID_POSTAL_CODE", "postal code must be in format XXXX-XXX")
 		}
 	}
 

@@ -2,7 +2,6 @@ package routes
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -21,16 +20,11 @@ type UserContext struct {
 	SessionID models.RecordId
 }
 
-type AuthError struct {
-	Code    string
-	Message string
-}
-
 type RouteContext struct {
 	logger       *logger.Logger
 	ctx          fiber.Ctx
 	userContext  *UserContext
-	authError    *AuthError
+	authError    *server_error.ServerError
 	db           *database.Database
 	serverConfig *config.ServerConfig
 }
@@ -64,16 +58,20 @@ func (route *RouteContext) Ctx() fiber.Ctx {
 	return route.ctx
 }
 
+// RequestContext returns the request-scoped context; database operations run
+// under it so a dropped connection cancels their work.
+func (route *RouteContext) RequestContext() context.Context {
+	return route.ctx.Context()
+}
+
 func (route *RouteContext) IsAuthenticated() bool {
 	return route.userContext != nil
 }
 
-func (route *RouteContext) GetAuthError() *AuthError {
+// AuthError returns why authentication failed — always an Unauthorized-kinded
+// error, nil when the request is authenticated.
+func (route *RouteContext) AuthError() *server_error.ServerError {
 	return route.authError
-}
-
-func (route *RouteContext) UserContext() *UserContext {
-	return route.userContext
 }
 
 func (route *RouteContext) GetUserId() models.RecordId {
@@ -90,20 +88,8 @@ func (route *RouteContext) GetSessionId() models.RecordId {
 	return route.userContext.SessionID
 }
 
-func (route *RouteContext) InternalError(msg string) error {
-	return route.RespondError(fiber.StatusInternalServerError, "INTERNAL_ERROR", msg)
-}
-
-func (route *RouteContext) BadRequest(msg string) error {
-	return route.RespondError(fiber.StatusBadRequest, "BAD_REQUEST", msg)
-}
-
 func (route *RouteContext) RespondData(data any) error {
 	return route.Respond(fiber.StatusOK, models.NewServerAPIResponse(true, data, nil))
-}
-
-func (route *RouteContext) RespondError(status int, code string, message string) error {
-	return route.Respond(status, models.NewServerAPIResponse(false, nil, models.NewServerAPIError(code, message)))
 }
 
 func (route *RouteContext) Respond(status int, response *models.ServerAPIResponse) error {
@@ -118,38 +104,34 @@ func (route *RouteContext) Respond(status int, response *models.ServerAPIRespons
 func (route *RouteContext) ReadBody(body any) error {
 	err := route.ctx.Bind().JSON(body)
 	if err != nil {
-		return server_error.Wrap("ROUTE_HANDLER", "failed to read body", err)
+		return server_error.BadRequest("invalid request body").WithCause(err)
 	}
 	return nil
 }
 
 // ParseIdParam parses a route parameter as a RecordId.
-// Returns the parsed ID or an error response if the parameter is not a valid integer.
 func (route *RouteContext) ParseIdParam(paramName string) (models.RecordId, error) {
 	idStr := route.ctx.Params(paramName)
 	idInt, err := strconv.Atoi(idStr)
 	if err != nil {
-		return models.InvalidRecordId, route.BadRequest("Invalid " + paramName + " ID")
+		return models.InvalidRecordId, server_error.BadRequest("Invalid " + paramName + " ID")
 	}
 	return models.RecordId(idInt), nil
 }
 
-// RequireUserId returns the authenticated user's ID or sends an unauthorized response.
+// RequireUserId returns the authenticated user's ID or an unauthorized error.
 func (route *RouteContext) RequireUserId() (models.RecordId, error) {
 	userId := route.GetUserId()
 	if !userId.IsValid() {
-		return models.InvalidRecordId, route.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated")
+		return models.InvalidRecordId, server_error.Unauthorized("UNAUTHORIZED", "User not authenticated")
 	}
 	return userId, nil
 }
 
-func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *config.ServerConfig, logger *logger.Logger) (*UserContext, *AuthError) {
+func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *config.ServerConfig, logger *logger.Logger) (*UserContext, *server_error.ServerError) {
 	jwtToken := ctx.Cookies(config.SessionCookieName)
 	if jwtToken == "" {
-		return nil, &AuthError{
-			Code:    "COOKIE_MISSING",
-			Message: "Session cookie not found",
-		}
+		return nil, server_error.Unauthorized("COOKIE_MISSING", "Session cookie not found")
 	}
 
 	jwtSecret := serverConfig.Security().JwtSecret()
@@ -158,48 +140,32 @@ func extractUserContext(ctx fiber.Ctx, db *database.Database, serverConfig *conf
 		logger.Debug(fmt.Sprintf("Invalid JWT token: %s", err.Error()))
 		clearSessionCookie(ctx, serverConfig)
 
-		var serverErr *server_error.ServerError
-		if errors.As(err, &serverErr) && serverErr.Contains("expired") {
-			return nil, &AuthError{
-				Code:    "JWT_EXPIRED",
-				Message: "Session token has expired",
-			}
+		if server_error.IsServerError(err, "JWT_EXPIRED") {
+			return nil, server_error.Unauthorized("JWT_EXPIRED", "Session token has expired")
 		}
-		return nil, &AuthError{
-			Code:    "JWT_INVALID",
-			Message: "Session token is invalid",
-		}
+		return nil, server_error.Unauthorized("JWT_INVALID", "Session token is invalid")
 	}
 
 	sessionId := models.RecordId(claims.SessionId)
 	sessionRepo := db.NewSessionRepository()
 
-	isValid, err := sessionRepo.ValidateSession(context.Background(), sessionId)
+	isValid, err := sessionRepo.ValidateSession(ctx.Context(), sessionId)
 	if err != nil {
 		logger.Warn(fmt.Sprintf("Error validating session: %s", err.Error()))
 
 		if server_error.IsServerError(err, "SESSION_NOT_FOUND") {
 			clearSessionCookie(ctx, serverConfig)
-			return nil, &AuthError{
-				Code:    "SESSION_NOT_FOUND",
-				Message: "Session not found",
-			}
+			return nil, server_error.Unauthorized("SESSION_NOT_FOUND", "Session not found")
 		}
 
-		return nil, &AuthError{
-			Code:    "SESSION_VALIDATION_ERROR",
-			Message: "Failed to validate session",
-		}
+		return nil, server_error.Unauthorized("SESSION_VALIDATION_ERROR", "Failed to validate session")
 	}
 
 	if !isValid {
 		logger.Debug(fmt.Sprintf("Session %d is not valid or expired", sessionId))
 		clearSessionCookie(ctx, serverConfig)
 
-		return nil, &AuthError{
-			Code:    "SESSION_INVALID",
-			Message: "Session is expired or has been invalidated",
-		}
+		return nil, server_error.Unauthorized("SESSION_INVALID", "Session is expired or has been invalidated")
 	}
 
 	userId := models.RecordId(claims.UserId)

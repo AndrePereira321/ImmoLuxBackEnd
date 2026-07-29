@@ -53,7 +53,7 @@ func ProcessImage(data []byte, contentType string) (*ProcessedImage, error) {
 			return nil, server_error.Wrap("IMAGE_DECODE", "failed to decode WebP image", err)
 		}
 	case "image/avif", "image/heic", "image/heif":
-		return nil, server_error.New("IMAGE_FORMAT_NOT_SUPPORTED",
+		return nil, server_error.Invalid("IMAGE_FORMAT_NOT_SUPPORTED",
 			"AVIF/HEIC/HEIF formats require native libraries. Please convert to JPEG, PNG, WebP, or TIFF before uploading")
 	case "image/tiff":
 		img, err = tiff.Decode(reader)
@@ -66,7 +66,7 @@ func ProcessImage(data []byte, contentType string) (*ProcessedImage, error) {
 			return nil, server_error.Wrap("IMAGE_DECODE", "failed to decode BMP image", err)
 		}
 	default:
-		return nil, server_error.New("IMAGE_UNSUPPORTED",
+		return nil, server_error.Invalid("IMAGE_UNSUPPORTED",
 			fmt.Sprintf("unsupported image format: %s. Supported formats: JPEG, PNG, WebP, TIFF, BMP", contentType))
 	}
 
@@ -138,12 +138,12 @@ func ReadImageFromReader(reader io.Reader, maxSize int64) ([]byte, string, error
 	}
 
 	if len(data) == 0 {
-		return nil, "", server_error.New("IMAGE_EMPTY", "image data is empty")
+		return nil, "", server_error.Invalid("IMAGE_EMPTY", "image data is empty")
 	}
 
 	contentType := detectContentType(data)
 	if contentType == "" {
-		return nil, "", server_error.New("IMAGE_INVALID", "invalid image format")
+		return nil, "", server_error.Invalid("IMAGE_INVALID", "invalid image format")
 	}
 
 	return data, contentType, nil

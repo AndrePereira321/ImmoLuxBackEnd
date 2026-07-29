@@ -20,7 +20,7 @@ func NewUserRepository(db *Database) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-func (rep *UserRepository) CreateUser(ctx context.Context, tx *client.Tx, user *models.UserDTO, password string) (models.RecordId, error) {
+func (rep *UserRepository) createUser(ctx context.Context, tx *client.Tx, user *models.UserDTO, password string) (models.RecordId, error) {
 	if err := rep.validateUserInput(user, password); err != nil {
 		return models.InvalidRecordId, err
 	}
@@ -78,7 +78,7 @@ func (rep *UserRepository) GetUserID(email string) (models.RecordId, error) {
 		Only(ctx)
 	if err != nil {
 		if client.IsNotFound(err) {
-			return models.InvalidRecordId, server_error.New("USER_NOT_FOUND", fmt.Sprintf("user not found: %s", email))
+			return models.InvalidRecordId, server_error.NotFound("USER_NOT_FOUND", fmt.Sprintf("user not found: %s", email))
 		}
 		return models.InvalidRecordId, server_error.Wrap("USER_REPOSITORY", "failed querying user", err)
 	}
@@ -89,7 +89,7 @@ func (rep *UserRepository) GetUserById(ctx context.Context, userId models.Record
 	u, err := rep.db.client.User.Get(ctx, int(userId))
 	if err != nil {
 		if client.IsNotFound(err) {
-			return nil, server_error.New("USER_NOT_FOUND", fmt.Sprintf("user not found: %d", userId))
+			return nil, server_error.NotFound("USER_NOT_FOUND", fmt.Sprintf("user not found: %d", userId))
 		}
 		return nil, server_error.Wrap("USER_REPOSITORY", "failed querying user by ID", err)
 	}
@@ -117,7 +117,7 @@ func (rep *UserRepository) GetUserAuth(email string) (*models.UserDTO, *models.U
 		Only(ctx)
 	if err != nil {
 		if client.IsNotFound(err) {
-			return nil, nil, server_error.New("USER_NOT_FOUND", fmt.Sprintf("user not found: %s", email))
+			return nil, nil, server_error.NotFound("USER_NOT_FOUND", fmt.Sprintf("user not found: %s", email))
 		}
 		return nil, nil, server_error.Wrap("USER_REPOSITORY", "failed querying user with auth", err)
 	}
@@ -142,19 +142,19 @@ func (rep *UserRepository) GetUserAuth(email string) (*models.UserDTO, *models.U
 
 func (rep *UserRepository) validateUserInput(user *models.UserDTO, password string) error {
 	if *user.FirstName == "" {
-		return server_error.New("USER_VALIDATION", "first name is required")
+		return server_error.Invalid("USER_VALIDATION", "first name is required")
 	}
 	if *user.LastName == "" {
-		return server_error.New("USER_VALIDATION", "last name is required")
+		return server_error.Invalid("USER_VALIDATION", "last name is required")
 	}
 	if *user.Email == "" {
-		return server_error.New("USER_VALIDATION", "email is required")
+		return server_error.Invalid("USER_VALIDATION", "email is required")
 	}
 	if !utils.IsValidEmail(*user.Email) {
-		return server_error.New("USER_VALIDATION", "invalid email")
+		return server_error.Invalid("USER_VALIDATION", "invalid email")
 	}
 	if password == "" {
-		return server_error.New("USER_VALIDATION", "password is required")
+		return server_error.Invalid("USER_VALIDATION", "password is required")
 	}
 	return nil
 }

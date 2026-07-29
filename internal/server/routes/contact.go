@@ -1,12 +1,7 @@
 package routes
 
 import (
-	"context"
-	"fmt"
-
-	"immo-lux/internal/database/ent/client"
 	"immo-lux/internal/models"
-	"immo-lux/internal/server_error"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -37,35 +32,18 @@ func CreateContact(ctx *RouteContext) error {
 	}
 
 	contactDTO := &models.ContactDTO{
-		UserID: &userId,
-		Name:   &payload.Name,
-		Email:  &payload.Email,
-		Phone:  &payload.Phone,
-		Notes:  payload.Notes,
+		Name:  &payload.Name,
+		Email: &payload.Email,
+		Phone: &payload.Phone,
+		Notes: payload.Notes,
 	}
 
-	var contactId models.RecordId
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		id, createErr := ctx.Db().NewContactRepository().CreateContact(txCtx, tx, contactDTO)
-		if createErr != nil {
-			return createErr
-		}
-		contactId = id
-		return nil
-	})
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to create contact: %s", err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Contact created by user %d: %d", userId, contactId))
-
-	createdContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
+	created, err := ctx.Db().NewContactRepository().CreateContact(ctx.RequestContext(), userId, contactDTO)
 	if err != nil {
 		return err
 	}
 
-	return ctx.RespondData(createdContact)
+	return ctx.RespondData(created)
 }
 
 func GetContact(ctx *RouteContext) error {
@@ -79,16 +57,9 @@ func GetContact(ctx *RouteContext) error {
 		return err
 	}
 
-	contact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
+	contact, err := ctx.Db().NewContactRepository().GetOwnedContact(ctx.RequestContext(), userId, contactId)
 	if err != nil {
-		if server_error.IsServerError(err, "CONTACT_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "CONTACT_NOT_FOUND", "Contact not found")
-		}
 		return err
-	}
-
-	if *contact.UserID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only view your own contacts")
 	}
 
 	return ctx.RespondData(contact)
@@ -100,9 +71,8 @@ func ListMyContacts(ctx *RouteContext) error {
 		return err
 	}
 
-	contacts, err := ctx.Db().NewContactRepository().GetContactsByUserId(context.Background(), userId)
+	contacts, err := ctx.Db().NewContactRepository().GetContactsByUserId(ctx.RequestContext(), userId)
 	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to list contacts: %s", err.Error()))
 		return err
 	}
 
@@ -122,18 +92,6 @@ func UpdateContact(ctx *RouteContext) error {
 		return err
 	}
 
-	existingContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
-	if err != nil {
-		if server_error.IsServerError(err, "CONTACT_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "CONTACT_NOT_FOUND", "Contact not found")
-		}
-		return err
-	}
-
-	if *existingContact.UserID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only update your own contacts")
-	}
-
 	payload := &UpdateContactPayload{}
 	if err := ctx.ReadBody(&payload); err != nil {
 		return err
@@ -146,23 +104,12 @@ func UpdateContact(ctx *RouteContext) error {
 		Notes: payload.Notes,
 	}
 
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		return ctx.Db().NewContactRepository().UpdateContact(txCtx, tx, contactId, contactDTO)
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to update contact %d: %s", contactId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Contact updated by user %d: %d", userId, contactId))
-
-	updatedContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
+	updated, err := ctx.Db().NewContactRepository().UpdateContact(ctx.RequestContext(), userId, contactId, contactDTO)
 	if err != nil {
 		return err
 	}
 
-	return ctx.RespondData(updatedContact)
+	return ctx.RespondData(updated)
 }
 
 func DeleteContact(ctx *RouteContext) error {
@@ -176,28 +123,9 @@ func DeleteContact(ctx *RouteContext) error {
 		return err
 	}
 
-	existingContact, err := ctx.Db().NewContactRepository().GetContactById(context.Background(), contactId)
-	if err != nil {
-		if server_error.IsServerError(err, "CONTACT_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "CONTACT_NOT_FOUND", "Contact not found")
-		}
+	if err := ctx.Db().NewContactRepository().DeleteContact(ctx.RequestContext(), userId, contactId); err != nil {
 		return err
 	}
-
-	if *existingContact.UserID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only delete your own contacts")
-	}
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		return ctx.Db().NewContactRepository().DeleteContact(txCtx, tx, contactId)
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to delete contact %d: %s", contactId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Contact deleted by user %d: %d", userId, contactId))
 
 	return ctx.RespondData(&fiber.Map{
 		"success": true,

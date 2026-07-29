@@ -27,7 +27,9 @@ type CreateSessionParams struct {
 	UserAgent  *string
 }
 
-func (rep *SessionRepository) CreateSession(ctx context.Context, tx *client.Tx, params CreateSessionParams) (models.RecordId, error) {
+// createSession inserts a session inside the caller's transaction; only the
+// login operation opens sessions.
+func (rep *SessionRepository) createSession(ctx context.Context, tx *client.Tx, params CreateSessionParams) (models.RecordId, error) {
 	sessionBuilder := tx.Session.Create().
 		SetUserID(int(params.UserID)).
 		SetSessionToken(params.TokenHash).
@@ -59,7 +61,7 @@ func (rep *SessionRepository) GetSessionById(ctx context.Context, sessionId mode
 		Only(ctx)
 	if err != nil {
 		if client.IsNotFound(err) {
-			return nil, server_error.New("SESSION_NOT_FOUND", fmt.Sprintf("session not found: %d", sessionId))
+			return nil, server_error.NotFound("SESSION_NOT_FOUND", fmt.Sprintf("session not found: %d", sessionId))
 		}
 		return nil, server_error.Wrap("SESSION_REPOSITORY", "failed querying session", err)
 	}
@@ -73,7 +75,7 @@ func (rep *SessionRepository) GetSessionByToken(ctx context.Context, tokenHash s
 		Only(ctx)
 	if err != nil {
 		if client.IsNotFound(err) {
-			return nil, server_error.New("SESSION_NOT_FOUND", "session not found")
+			return nil, server_error.NotFound("SESSION_NOT_FOUND", "session not found")
 		}
 		return nil, server_error.Wrap("SESSION_REPOSITORY", "failed querying session by token", err)
 	}
@@ -101,40 +103,31 @@ func (rep *SessionRepository) ValidateSession(ctx context.Context, sessionId mod
 	return true, nil
 }
 
-func (rep *SessionRepository) InvalidateSession(ctx context.Context, tx *client.Tx, sessionId models.RecordId, reason string) error {
-	now := time.Now()
-	_, err := tx.Session.UpdateOneID(int(sessionId)).
+// RevokeOwnedSession invalidates a session ownerId owns with one
+// owner-predicated statement, probing only when nothing matched.
+func (rep *SessionRepository) RevokeOwnedSession(ctx context.Context, ownerId, sessionId models.RecordId, reason string) error {
+	updated, err := rep.db.client.Session.Update().
+		Where(session.IDEQ(int(sessionId)), session.UserIDEQ(int(ownerId))).
 		SetIsActive(false).
-		SetInvalidatedAt(now).
+		SetInvalidatedAt(time.Now()).
 		SetInvalidatedReason(reason).
 		Save(ctx)
-
 	if err != nil {
 		rep.db.Logger().Error(fmt.Sprintf("Failed to invalidate session %d: %s", sessionId, err.Error()))
 		return server_error.Wrap("SESSION_INVALIDATE", "failed to invalidate session", err)
 	}
-
-	return nil
-}
-
-func (rep *SessionRepository) InvalidateSessionByToken(ctx context.Context, tx *client.Tx, tokenHash string, reason string) error {
-	now := time.Now()
-	count, err := tx.Session.Update().
-		Where(session.SessionTokenEQ(tokenHash)).
-		SetIsActive(false).
-		SetInvalidatedAt(now).
-		SetInvalidatedReason(reason).
-		Save(ctx)
-
-	if err != nil {
-		rep.db.Logger().Error(fmt.Sprintf("Failed to invalidate session by token: %s", err.Error()))
-		return server_error.Wrap("SESSION_INVALIDATE", "failed to invalidate session by token", err)
+	if updated == 0 {
+		return ownershipVerdict(ctx,
+			func(c context.Context) (bool, error) {
+				return rep.db.client.Session.Query().Where(session.IDEQ(int(sessionId))).Exist(c)
+			},
+			"SESSION_REPOSITORY",
+			server_error.NotFound("SESSION_NOT_FOUND", "Session not found"),
+			server_error.Forbidden("FORBIDDEN", "You can only revoke your own sessions"),
+		)
 	}
 
-	if count == 0 {
-		return server_error.New("SESSION_NOT_FOUND", "session not found")
-	}
-
+	rep.db.Logger().Info(fmt.Sprintf("User %d revoked session %d", ownerId, sessionId))
 	return nil
 }
 

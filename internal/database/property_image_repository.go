@@ -5,9 +5,11 @@ import (
 	"fmt"
 
 	"immo-lux/internal/database/ent/client"
+	"immo-lux/internal/database/ent/client/property"
 	"immo-lux/internal/database/ent/client/propertyimage"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
+	"immo-lux/internal/utils"
 )
 
 type PropertyImageRepository struct {
@@ -18,151 +20,151 @@ func NewPropertyImageRepository(db *Database) *PropertyImageRepository {
 	return &PropertyImageRepository{db: db}
 }
 
-func (rep *PropertyImageRepository) CreateImage(ctx context.Context, tx *client.Tx, propertyId models.RecordId, imageData []byte, contentType string, width, height, fileSize, displayOrder int) (models.RecordId, error) {
-	if !propertyId.IsValid() {
-		return models.InvalidRecordId, server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
-	}
-
-	if len(imageData) == 0 {
-		return models.InvalidRecordId, server_error.New("IMAGE_VALIDATION", "image data is empty")
-	}
-
-	rep.db.Logger().Debug(fmt.Sprintf("Creating image for property: %d", propertyId))
-
-	createdImage, err := tx.PropertyImage.Create().
-		SetPropertyID(int(propertyId)).
-		SetImageData(imageData).
-		SetContentType(contentType).
-		SetFileSize(fileSize).
-		SetWidth(width).
-		SetHeight(height).
-		SetDisplayOrder(displayOrder).
-		Save(ctx)
-
-	if err != nil {
-		rep.db.Logger().Error(fmt.Sprintf("Failed to create image for property [%d]: %s", propertyId, err.Error()))
-		return models.InvalidRecordId, server_error.Wrap("IMAGE_INSERT", "failed to insert property image", err)
-	}
-
-	rep.db.Logger().Info(fmt.Sprintf("Image created successfully: %d", createdImage.ID))
-	return models.RecordId(createdImage.ID), nil
-}
-
-func (rep *PropertyImageRepository) GetImageById(ctx context.Context, imageId models.RecordId) ([]byte, string, error) {
-	if !imageId.IsValid() {
-		return nil, "", server_error.New("INVALID_IMAGE_ID", "image ID is invalid")
-	}
-
-	img, err := rep.db.client.PropertyImage.Query().
-		Where(propertyimage.IDEQ(int(imageId))).
-		Only(ctx)
-
-	if err != nil {
-		if client.IsNotFound(err) {
-			return nil, "", server_error.New("IMAGE_NOT_FOUND", "image not found")
+// imageMetadataColumns is every generated column except image_data, derived so
+// a new schema field joins the projection automatically. No metadata query may
+// read the blob; only ImagePayload does.
+var imageMetadataColumns = func() []string {
+	columns := make([]string, 0, len(propertyimage.Columns)-1)
+	for _, column := range propertyimage.Columns {
+		if column != propertyimage.FieldImageData {
+			columns = append(columns, column)
 		}
-		return nil, "", server_error.Wrap("IMAGE_QUERY", "failed to query image", err)
 	}
+	return columns
+}()
 
-	return img.ImageData, img.ContentType, nil
-}
-
-func (rep *PropertyImageRepository) GetImageMetadataById(ctx context.Context, imageId models.RecordId) (*models.PropertyImageDTO, error) {
-	if !imageId.IsValid() {
-		return nil, server_error.New("INVALID_IMAGE_ID", "image ID is invalid")
-	}
-
-	img, err := rep.db.client.PropertyImage.Query().
-		Where(propertyimage.IDEQ(int(imageId))).
-		Only(ctx)
-
-	if err != nil {
-		if client.IsNotFound(err) {
-			return nil, server_error.New("IMAGE_NOT_FOUND", "image not found")
-		}
-		return nil, server_error.Wrap("IMAGE_QUERY", "failed to query image", err)
-	}
-
-	return rep.entToDTO(img), nil
-}
-
-func (rep *PropertyImageRepository) GetImagesByPropertyId(ctx context.Context, propertyId models.RecordId) ([]models.PropertyImageDTO, error) {
+// UploadImage processes and stores a new image on a property ownerId owns. The
+// payload is normalised (JPEG, bounded dimensions) before storage; a nil
+// requestedOrder appends the image after the current gallery.
+func (rep *PropertyImageRepository) UploadImage(ctx context.Context, ownerId, propertyId models.RecordId, data []byte, contentType string, requestedOrder *int) (models.RecordId, error) {
 	if !propertyId.IsValid() {
-		return nil, server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
+		return models.InvalidRecordId, server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
+	}
+	if requestedOrder != nil && *requestedOrder < 0 {
+		return models.InvalidRecordId, server_error.Invalid("IMAGE_VALIDATION", "display order must be non-negative")
 	}
 
-	images, err := rep.db.client.PropertyImage.Query().
-		Where(propertyimage.PropertyIDEQ(int(propertyId))).
-		Order(client.Asc(propertyimage.FieldDisplayOrder)).
-		All(ctx)
-
+	// Certify ownership before paying for the decode; the in-transaction check
+	// below is the one that holds at write time.
+	owned, err := rep.db.client.Property.Query().
+		Where(property.IDEQ(int(propertyId)), property.PublisherIDEQ(int(ownerId))).
+		Exist(ctx)
 	if err != nil {
-		return nil, server_error.Wrap("IMAGE_LIST", "failed to list property images", err)
+		return models.InvalidRecordId, server_error.Wrap("PROPERTY_QUERY", "failed to check property ownership", err)
+	}
+	if !owned {
+		propertyRepo := NewPropertyRepository(rep.db)
+		return models.InvalidRecordId, propertyRepo.ownershipVerdict(ctx, func(c context.Context) (bool, error) {
+			return rep.db.client.Property.Query().Where(property.IDEQ(int(propertyId))).Exist(c)
+		})
 	}
 
-	dtos := make([]models.PropertyImageDTO, len(images))
-	for i, img := range images {
-		dtos[i] = *rep.entToDTO(img)
+	processed, err := utils.ProcessImage(data, contentType)
+	if err != nil {
+		return models.InvalidRecordId, err
 	}
 
-	return dtos, nil
+	var imageId models.RecordId
+	err = rep.db.WithTransaction(ctx, func(txCtx context.Context, tx *client.Tx) error {
+		if err := NewPropertyRepository(rep.db).ensureOwned(txCtx, tx, ownerId, propertyId); err != nil {
+			return err
+		}
+
+		var displayOrder int
+		if requestedOrder != nil {
+			displayOrder = *requestedOrder
+		} else {
+			nextOrder, err := nextDisplayOrder(txCtx, tx, propertyId)
+			if err != nil {
+				return err
+			}
+			displayOrder = nextOrder
+		}
+
+		createdImage, err := tx.PropertyImage.Create().
+			SetPropertyID(int(propertyId)).
+			SetImageData(processed.Data).
+			SetContentType(processed.ContentType).
+			SetFileSize(processed.FileSize).
+			SetWidth(processed.Width).
+			SetHeight(processed.Height).
+			SetDisplayOrder(displayOrder).
+			Save(txCtx)
+		if err != nil {
+			rep.db.Logger().Error(fmt.Sprintf("Failed to create image for property [%d]: %s", propertyId, err.Error()))
+			return server_error.Wrap("IMAGE_INSERT", "failed to insert property image", err)
+		}
+
+		imageId = models.RecordId(createdImage.ID)
+		return nil
+	})
+	if err != nil {
+		return models.InvalidRecordId, err
+	}
+
+	rep.db.Logger().Info(fmt.Sprintf("Image uploaded for property %d: %d", propertyId, imageId))
+	return imageId, nil
 }
 
-func (rep *PropertyImageRepository) UpdateImageOrder(ctx context.Context, tx *client.Tx, imageId models.RecordId, newOrder int) error {
+// UpdateImageOrder moves an image within a gallery ownerId owns, with one
+// owner-predicated statement; the probes run only when nothing matched.
+func (rep *PropertyImageRepository) UpdateImageOrder(ctx context.Context, ownerId, imageId models.RecordId, newOrder int) error {
 	if !imageId.IsValid() {
-		return server_error.New("INVALID_IMAGE_ID", "image ID is invalid")
+		return server_error.Invalid("INVALID_IMAGE_ID", "image ID is invalid")
 	}
-
 	if newOrder < 0 {
-		return server_error.New("IMAGE_VALIDATION", "display order must be non-negative")
+		return server_error.Invalid("IMAGE_VALIDATION", "display order must be non-negative")
 	}
 
-	err := tx.PropertyImage.UpdateOneID(int(imageId)).
+	updated, err := rep.db.client.PropertyImage.Update().
+		Where(
+			propertyimage.IDEQ(int(imageId)),
+			propertyimage.HasPropertyWith(property.PublisherIDEQ(int(ownerId))),
+		).
 		SetDisplayOrder(newOrder).
-		Exec(ctx)
-
+		Save(ctx)
 	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("IMAGE_NOT_FOUND", "image not found")
-		}
 		return server_error.Wrap("IMAGE_UPDATE_ORDER", "failed to update image order", err)
+	}
+	if updated == 0 {
+		return rep.imageOwnershipVerdict(ctx, imageId)
 	}
 
 	rep.db.Logger().Info(fmt.Sprintf("Image order updated: %d", imageId))
 	return nil
 }
 
-func (rep *PropertyImageRepository) DeleteImage(ctx context.Context, tx *client.Tx, imageId models.RecordId) error {
+// DeleteImage removes an image from a gallery ownerId owns, with one
+// owner-predicated statement; the probes run only when nothing matched.
+func (rep *PropertyImageRepository) DeleteImage(ctx context.Context, ownerId, imageId models.RecordId) error {
 	if !imageId.IsValid() {
-		return server_error.New("INVALID_IMAGE_ID", "image ID is invalid")
+		return server_error.Invalid("INVALID_IMAGE_ID", "image ID is invalid")
 	}
 
-	rep.db.Logger().Debug(fmt.Sprintf("Deleting image: %d", imageId))
-
-	err := tx.PropertyImage.DeleteOneID(int(imageId)).Exec(ctx)
+	deleted, err := rep.db.client.PropertyImage.Delete().
+		Where(
+			propertyimage.IDEQ(int(imageId)),
+			propertyimage.HasPropertyWith(property.PublisherIDEQ(int(ownerId))),
+		).
+		Exec(ctx)
 	if err != nil {
-		if client.IsNotFound(err) {
-			return server_error.New("IMAGE_NOT_FOUND", "image not found")
-		}
 		rep.db.Logger().Error(fmt.Sprintf("Failed to delete image [%d]: %s", imageId, err.Error()))
 		return server_error.Wrap("IMAGE_DELETE", "failed to delete image", err)
+	}
+	if deleted == 0 {
+		return rep.imageOwnershipVerdict(ctx, imageId)
 	}
 
 	rep.db.Logger().Info(fmt.Sprintf("Image deleted successfully: %d", imageId))
 	return nil
 }
 
-func (rep *PropertyImageRepository) DeleteImagesByPropertyId(ctx context.Context, tx *client.Tx, propertyId models.RecordId) error {
-	if !propertyId.IsValid() {
-		return server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
-	}
-
-	rep.db.Logger().Debug(fmt.Sprintf("Deleting all images for property: %d", propertyId))
-
+// deleteImagesByPropertyId clears a property's gallery inside the caller's
+// transaction; the property delete operation runs it before removing the row.
+func (rep *PropertyImageRepository) deleteImagesByPropertyId(ctx context.Context, tx *client.Tx, propertyId models.RecordId) error {
 	deleted, err := tx.PropertyImage.Delete().
 		Where(propertyimage.PropertyIDEQ(int(propertyId))).
 		Exec(ctx)
-
 	if err != nil {
 		rep.db.Logger().Error(fmt.Sprintf("Failed to delete images for property [%d]: %s", propertyId, err.Error()))
 		return server_error.Wrap("IMAGE_DELETE_BATCH", "failed to delete property images", err)
@@ -172,29 +174,79 @@ func (rep *PropertyImageRepository) DeleteImagesByPropertyId(ctx context.Context
 	return nil
 }
 
-func (rep *PropertyImageRepository) GetNextDisplayOrder(ctx context.Context, propertyId models.RecordId) (int, error) {
+// ListImageMetadata returns a property's gallery metadata in display order.
+func (rep *PropertyImageRepository) ListImageMetadata(ctx context.Context, propertyId models.RecordId) ([]models.PropertyImageDTO, error) {
 	if !propertyId.IsValid() {
-		return 0, server_error.New("INVALID_PROPERTY_ID", "property ID is invalid")
+		return nil, server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
 	}
 
 	images, err := rep.db.client.PropertyImage.Query().
 		Where(propertyimage.PropertyIDEQ(int(propertyId))).
+		Order(client.Asc(propertyimage.FieldDisplayOrder)).
+		Select(imageMetadataColumns...).
+		All(ctx)
+	if err != nil {
+		return nil, server_error.Wrap("IMAGE_LIST", "failed to list property images", err)
+	}
+
+	dtos := make([]models.PropertyImageDTO, len(images))
+	for i, img := range images {
+		dtos[i] = *imageMetadataToDTO(img)
+	}
+	return dtos, nil
+}
+
+// ImagePayload returns the stored bytes and content type of one image — the
+// only query that reads image_data.
+func (rep *PropertyImageRepository) ImagePayload(ctx context.Context, imageId models.RecordId) ([]byte, string, error) {
+	if !imageId.IsValid() {
+		return nil, "", server_error.Invalid("INVALID_IMAGE_ID", "image ID is invalid")
+	}
+
+	img, err := rep.db.client.PropertyImage.Query().
+		Where(propertyimage.IDEQ(int(imageId))).
+		Select(propertyimage.FieldImageData, propertyimage.FieldContentType).
+		Only(ctx)
+	if err != nil {
+		if client.IsNotFound(err) {
+			return nil, "", server_error.NotFound("IMAGE_NOT_FOUND", "image not found")
+		}
+		return nil, "", server_error.Wrap("IMAGE_QUERY", "failed to query image", err)
+	}
+
+	return img.ImageData, img.ContentType, nil
+}
+
+// imageOwnershipVerdict explains an owner-predicated image statement that
+// matched nothing.
+func (rep *PropertyImageRepository) imageOwnershipVerdict(ctx context.Context, imageId models.RecordId) error {
+	return ownershipVerdict(ctx,
+		func(c context.Context) (bool, error) {
+			return rep.db.client.PropertyImage.Query().Where(propertyimage.IDEQ(int(imageId))).Exist(c)
+		},
+		"IMAGE_QUERY",
+		server_error.NotFound("IMAGE_NOT_FOUND", "image not found"),
+		server_error.Forbidden("ACCESS_DENIED", "you can only modify images of your own properties"),
+	)
+}
+
+func nextDisplayOrder(ctx context.Context, tx *client.Tx, propertyId models.RecordId) (int, error) {
+	orders, err := tx.PropertyImage.Query().
+		Where(propertyimage.PropertyIDEQ(int(propertyId))).
 		Order(client.Desc(propertyimage.FieldDisplayOrder)).
 		Limit(1).
-		All(ctx)
-
+		Select(propertyimage.FieldDisplayOrder).
+		Ints(ctx)
 	if err != nil {
 		return 0, server_error.Wrap("IMAGE_QUERY", "failed to query max display order", err)
 	}
-
-	if len(images) == 0 {
+	if len(orders) == 0 {
 		return 0, nil
 	}
-
-	return images[0].DisplayOrder + 1, nil
+	return orders[0] + 1, nil
 }
 
-func (rep *PropertyImageRepository) entToDTO(img *client.PropertyImage) *models.PropertyImageDTO {
+func imageMetadataToDTO(img *client.PropertyImage) *models.PropertyImageDTO {
 	imageId := models.RecordId(img.ID)
 	propertyId := models.RecordId(img.PropertyID)
 

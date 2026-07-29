@@ -1,11 +1,6 @@
 package routes
 
 import (
-	"context"
-	"fmt"
-
-	"immo-lux/internal/server_error"
-
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -15,9 +10,8 @@ func GetPropertyImages(ctx *RouteContext) error {
 		return err
 	}
 
-	images, err := ctx.Db().NewPropertyImageRepository().GetImagesByPropertyId(context.Background(), propertyId)
+	images, err := ctx.Db().NewPropertyImageRepository().ListImageMetadata(ctx.RequestContext(), propertyId)
 	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to get images for property %d: %s", propertyId, err.Error()))
 		return err
 	}
 
@@ -32,11 +26,8 @@ func GetImage(ctx *RouteContext) error {
 		return err
 	}
 
-	imageData, contentType, err := ctx.Db().NewPropertyImageRepository().GetImageById(context.Background(), imageId)
+	imageData, contentType, err := ctx.Db().NewPropertyImageRepository().ImagePayload(ctx.RequestContext(), imageId)
 	if err != nil {
-		if server_error.IsServerError(err, "IMAGE_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "IMAGE_NOT_FOUND", "Image not found")
-		}
 		return err
 	}
 

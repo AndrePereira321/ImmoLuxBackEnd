@@ -113,8 +113,7 @@ func (db *Database) NewRateLimitRepository() *RateLimitRepository {
 	return NewRateLimitRepository(db)
 }
 
-func (db *Database) WithTransaction(fn func(ctx context.Context, tx *client.Tx) error) error {
-	ctx := context.Background()
+func (db *Database) WithTransaction(ctx context.Context, fn func(ctx context.Context, tx *client.Tx) error) error {
 	tx, err := db.client.Tx(ctx)
 	if err != nil {
 		return server_error.Wrap("DB_TX", "failed to start transaction", err)
@@ -167,7 +166,7 @@ func (db *Database) initUsers() error {
 	}
 
 	userRepository := db.NewUserRepository()
-	return db.WithTransaction(func(ctx context.Context, tx *client.Tx) error {
+	return db.WithTransaction(context.Background(), func(ctx context.Context, tx *client.Tx) error {
 		for _, standardUser := range standardUsers {
 			exists, err := tx.User.Query().
 				Where(user.EmailEQ(standardUser.Email)).
@@ -182,7 +181,7 @@ func (db *Database) initUsers() error {
 			}
 
 			userDto := standardUser.ToUserDTO(true)
-			userId, err := userRepository.CreateUser(ctx, tx, userDto, standardUser.Password)
+			userId, err := userRepository.createUser(ctx, tx, userDto, standardUser.Password)
 			if err != nil {
 				return err
 			}

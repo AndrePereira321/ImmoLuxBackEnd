@@ -1,11 +1,8 @@
 package routes
 
 import (
-	"context"
-
+	"immo-lux/internal/server_error"
 	"immo-lux/internal/utils"
-
-	"github.com/gofiber/fiber/v3"
 )
 
 type LocationsResponse struct {
@@ -17,7 +14,7 @@ type LocationsResponse struct {
 func GetLocations(ctx *RouteContext) error {
 	validator, err := utils.GetLocationValidator()
 	if err != nil {
-		return ctx.RespondError(fiber.StatusInternalServerError, "LOCATION_VALIDATOR_ERROR", "Failed to load location data")
+		return server_error.Wrap("LOCATION_VALIDATOR_ERROR", "Failed to load location data", err)
 	}
 
 	response := LocationsResponse{
@@ -32,29 +29,29 @@ func GetLocations(ctx *RouteContext) error {
 func GetLocationStats(ctx *RouteContext) error {
 	districtSlug := ctx.Ctx().Query("district")
 	if districtSlug == "" {
-		return ctx.RespondError(fiber.StatusBadRequest, "MISSING_DISTRICT", "district parameter is required")
+		return server_error.Invalid("MISSING_DISTRICT", "district parameter is required")
 	}
 
 	validator, err := utils.GetLocationValidator()
 	if err != nil {
-		return ctx.RespondError(fiber.StatusInternalServerError, "LOCATION_VALIDATOR_ERROR", "Failed to load location data")
+		return server_error.Wrap("LOCATION_VALIDATOR_ERROR", "Failed to load location data", err)
 	}
 
 	district, ok := validator.SlugToDistrict(districtSlug)
 	if !ok {
-		return ctx.RespondError(fiber.StatusNotFound, "DISTRICT_NOT_FOUND", "district not found")
+		return server_error.NotFound("DISTRICT_NOT_FOUND", "district not found")
 	}
 
 	var municipality *string
 	if municipalitySlug := ctx.Ctx().Query("municipality"); municipalitySlug != "" {
 		name, ok := validator.SlugToMunicipality(municipalitySlug)
 		if !ok {
-			return ctx.RespondError(fiber.StatusNotFound, "MUNICIPALITY_NOT_FOUND", "municipality not found")
+			return server_error.NotFound("MUNICIPALITY_NOT_FOUND", "municipality not found")
 		}
 		municipality = &name
 	}
 
-	stats, err := ctx.Db().NewPropertyRepository().GetLocationStats(context.Background(), district, municipality)
+	stats, err := ctx.Db().NewPropertyRepository().GetLocationStats(ctx.RequestContext(), district, municipality)
 	if err != nil {
 		return err
 	}
@@ -63,7 +60,7 @@ func GetLocationStats(ctx *RouteContext) error {
 }
 
 func GetPublishedLocations(ctx *RouteContext) error {
-	locations, err := ctx.Db().NewPropertyRepository().GetPublishedLocations(context.Background())
+	locations, err := ctx.Db().NewPropertyRepository().GetPublishedLocations(ctx.RequestContext())
 	if err != nil {
 		return err
 	}

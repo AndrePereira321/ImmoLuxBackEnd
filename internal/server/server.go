@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"immo-lux/internal/config"
 	"immo-lux/internal/database"
 	"immo-lux/internal/logger"
@@ -110,10 +111,11 @@ func (s *Server) register(method fiberRegisterFunc, path string, handler RouteHa
 func (s *Server) handleRoute(ctx fiber.Ctx, handler RouteHandler, requireAuth bool) error {
 	routeContext := routes.GetRouteContext(s.logger, ctx, s.db, s.config)
 	if requireAuth && !routeContext.IsAuthenticated() {
-		if authError := routeContext.GetAuthError(); authError != nil {
-			return routeContext.RespondError(fiber.StatusUnauthorized, authError.Code, authError.Message)
+		authError := routeContext.AuthError()
+		if authError == nil {
+			authError = server_error.Unauthorized("UNAUTHORIZED", "Authentication required")
 		}
-		return routeContext.RespondError(fiber.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+		return handleServerError(routeContext, authError)
 	}
 
 	if err := handler(routeContext); err != nil {
@@ -124,14 +126,37 @@ func (s *Server) handleRoute(ctx fiber.Ctx, handler RouteHandler, requireAuth bo
 
 func handleServerError(ctx *routes.RouteContext, err error) error {
 	var serverError *server_error.ServerError
-	apiResponse := models.NewServerAPIResponse(false, nil, nil)
-	if errors.As(err, &serverError) {
-		apiResponse.Error = serverError.ToServerAPIError()
-	} else {
-		apiResponse.Error = models.NewServerAPIError("SERVER_ERROR", err.Error())
+	if !errors.As(err, &serverError) {
+		serverError = server_error.Wrap("SERVER_ERROR", err.Error(), err)
 	}
 
-	return ctx.Respond(fiber.StatusInternalServerError, apiResponse)
+	status := httpStatus(serverError.Kind)
+	request := ctx.Ctx().Method() + " " + ctx.Ctx().Path()
+	if status >= fiber.StatusInternalServerError {
+		ctx.Logger().Error(fmt.Sprintf("%s failed: %s", request, serverError.Error()))
+	} else {
+		ctx.Logger().Debug(fmt.Sprintf("%s rejected (%d): %s", request, status, serverError.Error()))
+	}
+
+	apiResponse := models.NewServerAPIResponse(false, nil, serverError.ToServerAPIError())
+	return ctx.Respond(status, apiResponse)
+}
+
+func httpStatus(kind server_error.Kind) int {
+	switch kind {
+	case server_error.KindInvalid:
+		return fiber.StatusBadRequest
+	case server_error.KindUnauthorized:
+		return fiber.StatusUnauthorized
+	case server_error.KindForbidden:
+		return fiber.StatusForbidden
+	case server_error.KindNotFound:
+		return fiber.StatusNotFound
+	case server_error.KindRateLimited:
+		return fiber.StatusTooManyRequests
+	default:
+		return fiber.StatusInternalServerError
+	}
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

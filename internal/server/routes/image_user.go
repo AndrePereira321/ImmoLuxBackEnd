@@ -1,11 +1,9 @@
 package routes
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 
-	"immo-lux/internal/database/ent/client"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
 	"immo-lux/internal/utils"
@@ -35,25 +33,12 @@ func UploadPropertyImage(ctx *RouteContext) error {
 		return err
 	}
 
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
-	if err != nil {
-		if server_error.IsServerError(err, "PROPERTY_NOT_FOUND") {
-			return ctx.RespondError(fiber.StatusNotFound, "PROPERTY_NOT_FOUND", "Property not found")
-		}
-		return err
-	}
-
-	if *existingProperty.PublisherID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only upload images to your own properties")
-	}
-
 	fileHeader, err := ctx.Ctx().FormFile("image")
 	if err != nil {
-		return ctx.BadRequest("No image file provided")
+		return server_error.BadRequest("No image file provided")
 	}
-
 	if fileHeader.Size > MaxImageSize {
-		return ctx.BadRequest(fmt.Sprintf("Image size must be less than %d MB", MaxImageSize/(1024*1024)))
+		return server_error.BadRequest(fmt.Sprintf("Image size must be less than %d MB", MaxImageSize/(1024*1024)))
 	}
 
 	file, err := fileHeader.Open()
@@ -67,54 +52,18 @@ func UploadPropertyImage(ctx *RouteContext) error {
 		return err
 	}
 
-	processedImage, err := utils.ProcessImage(imageData, contentType)
-	if err != nil {
-		return err
-	}
-
-	clientOrder := -1
+	var displayOrder *int
 	if s := ctx.Ctx().FormValue("displayOrder"); s != "" {
-		if n, parseErr := strconv.Atoi(s); parseErr == nil && n >= 0 {
-			clientOrder = n
+		if n, parseErr := strconv.Atoi(s); parseErr == nil {
+			displayOrder = &n
 		}
 	}
 
-	var imageId models.RecordId
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		displayOrder := clientOrder
-		if displayOrder < 0 {
-			nextOrder, err := ctx.Db().NewPropertyImageRepository().GetNextDisplayOrder(txCtx, propertyId)
-			if err != nil {
-				return err
-			}
-			displayOrder = nextOrder
-		}
-
-		id, err := ctx.Db().NewPropertyImageRepository().CreateImage(
-			txCtx,
-			tx,
-			propertyId,
-			processedImage.Data,
-			processedImage.ContentType,
-			processedImage.Width,
-			processedImage.Height,
-			processedImage.FileSize,
-			displayOrder,
-		)
-		if err != nil {
-			return err
-		}
-
-		imageId = id
-		return nil
-	})
-
+	imageId, err := ctx.Db().NewPropertyImageRepository().UploadImage(
+		ctx.RequestContext(), userId, propertyId, imageData, contentType, displayOrder)
 	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to upload image for property %d: %s", propertyId, err.Error()))
 		return err
 	}
-
-	ctx.Logger().Info(fmt.Sprintf("Image uploaded for property %d by user %d: image %d", propertyId, userId, imageId))
 
 	return ctx.RespondData(&UploadImageResponse{
 		ImageID: imageId,
@@ -133,31 +82,9 @@ func DeletePropertyImage(ctx *RouteContext) error {
 		return err
 	}
 
-	image, err := ctx.Db().NewPropertyImageRepository().GetImageMetadataById(context.Background(), imageId)
-	if err != nil {
-		return ctx.RespondError(fiber.StatusNotFound, "IMAGE_NOT_FOUND", "Image not found")
-	}
-
-	propertyId := *image.PropertyID
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), propertyId)
-	if err != nil {
+	if err := ctx.Db().NewPropertyImageRepository().DeleteImage(ctx.RequestContext(), userId, imageId); err != nil {
 		return err
 	}
-
-	if *existingProperty.PublisherID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only delete images from your own properties")
-	}
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		return ctx.Db().NewPropertyImageRepository().DeleteImage(txCtx, tx, imageId)
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to delete image %d: %s", imageId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Image deleted by user %d: %d", userId, imageId))
 
 	return ctx.RespondData(&fiber.Map{
 		"success": true,
@@ -181,30 +108,10 @@ func UpdatePropertyImageOrder(ctx *RouteContext) error {
 		return err
 	}
 
-	image, err := ctx.Db().NewPropertyImageRepository().GetImageMetadataById(context.Background(), imageId)
-	if err != nil {
-		return ctx.RespondError(fiber.StatusNotFound, "IMAGE_NOT_FOUND", "Image not found")
-	}
-
-	existingProperty, err := ctx.Db().NewPropertyRepository().GetPropertyById(context.Background(), *image.PropertyID)
-	if err != nil {
+	if err := ctx.Db().NewPropertyImageRepository().UpdateImageOrder(
+		ctx.RequestContext(), userId, imageId, payload.DisplayOrder); err != nil {
 		return err
 	}
-
-	if *existingProperty.PublisherID != userId {
-		return ctx.RespondError(fiber.StatusForbidden, "ACCESS_DENIED", "You can only modify images from your own properties")
-	}
-
-	err = ctx.Db().WithTransaction(func(txCtx context.Context, tx *client.Tx) error {
-		return ctx.Db().NewPropertyImageRepository().UpdateImageOrder(txCtx, tx, imageId, payload.DisplayOrder)
-	})
-
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("Failed to update image order %d: %s", imageId, err.Error()))
-		return err
-	}
-
-	ctx.Logger().Info(fmt.Sprintf("Image order updated by user %d: %d", userId, imageId))
 
 	return ctx.RespondData(&fiber.Map{
 		"success": true,

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
@@ -53,6 +54,9 @@ func ValidateJWT(tokenString string, secret string) (*JWTClaims, error) {
 	})
 
 	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, server_error.Unauthorized("JWT_EXPIRED", "JWT token has expired").WithCause(err)
+		}
 		return nil, server_error.Wrap("JWT_VALIDATION", "failed to parse JWT token", err)
 	}
 
