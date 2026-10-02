@@ -22,10 +22,12 @@ type Database struct {
 	sqlDB        *sql.DB
 	driver       *entsql.Driver
 	logger       *logger.Logger
+	maintenance  *maintenanceJob
 }
 
 func New(serverConfig *config.ServerConfig) (*Database, error) {
-	dbLogger, err := logger.New("DATABASE", serverConfig.Logging().DatabaseLogLevel(), serverConfig.Logging().LogDir())
+	loggingConfig := serverConfig.Logging()
+	dbLogger, err := logger.New("DATABASE", loggingConfig.DatabaseLogLevel(), loggingConfig.LogDir(), loggingConfig.LogToConsole())
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +80,7 @@ func (db *Database) Init() error {
 		db.logger.Warn(fmt.Sprintf("Failed to initialize users. Error: %s", err.Error()))
 		return err
 	}
+	db.startMaintenance()
 	return nil
 }
 
@@ -135,6 +138,8 @@ func (db *Database) WithTransaction(ctx context.Context, fn func(ctx context.Con
 }
 
 func (db *Database) Close() error {
+	db.stopMaintenance()
+
 	if err := db.client.Close(); err != nil {
 		db.logger.Warn(fmt.Sprintf("Error closing Ent client: %s", err.Error()))
 	}

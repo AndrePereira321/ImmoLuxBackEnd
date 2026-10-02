@@ -12,6 +12,11 @@ import (
 	"immo-lux/internal/utils"
 )
 
+// MaxImagesPerProperty caps a property's gallery. The panel allows 10 images
+// and deletes removed ones before uploading new ones, so this leaves headroom
+// while bounding how much image data a single property can hold.
+const MaxImagesPerProperty = 20
+
 type PropertyImageRepository struct {
 	db *Database
 }
@@ -35,7 +40,8 @@ var imageMetadataColumns = func() []string {
 
 // UploadImage processes and stores a new image on a property ownerId owns. The
 // payload is normalised (JPEG, bounded dimensions) before storage; a nil
-// requestedOrder appends the image after the current gallery.
+// requestedOrder appends the image after the current gallery. A property holds
+// at most MaxImagesPerProperty images.
 func (rep *PropertyImageRepository) UploadImage(ctx context.Context, ownerId, propertyId models.RecordId, data []byte, contentType string, requestedOrder *int) (models.RecordId, error) {
 	if !propertyId.IsValid() {
 		return models.InvalidRecordId, server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
@@ -44,8 +50,8 @@ func (rep *PropertyImageRepository) UploadImage(ctx context.Context, ownerId, pr
 		return models.InvalidRecordId, server_error.Invalid("IMAGE_VALIDATION", "display order must be non-negative")
 	}
 
-	// Certify ownership before paying for the decode; the in-transaction check
-	// below is the one that holds at write time.
+	// Certify ownership and the gallery limit before paying for the decode; the
+	// in-transaction checks below are the ones that hold at write time.
 	owned, err := rep.db.client.Property.Query().
 		Where(property.IDEQ(int(propertyId)), property.PublisherIDEQ(int(ownerId))).
 		Exist(ctx)
@@ -58,6 +64,9 @@ func (rep *PropertyImageRepository) UploadImage(ctx context.Context, ownerId, pr
 			return rep.db.client.Property.Query().Where(property.IDEQ(int(propertyId))).Exist(c)
 		})
 	}
+	if err := ensureImageCapacity(ctx, rep.db.client.PropertyImage, propertyId); err != nil {
+		return models.InvalidRecordId, err
+	}
 
 	processed, err := utils.ProcessImage(data, contentType)
 	if err != nil {
@@ -66,7 +75,12 @@ func (rep *PropertyImageRepository) UploadImage(ctx context.Context, ownerId, pr
 
 	var imageId models.RecordId
 	err = rep.db.WithTransaction(ctx, func(txCtx context.Context, tx *client.Tx) error {
-		if err := NewPropertyRepository(rep.db).ensureOwned(txCtx, tx, ownerId, propertyId); err != nil {
+		// The property row lock serialises concurrent uploads, so the count
+		// below cannot be raced past the limit.
+		if err := NewPropertyRepository(rep.db).lockOwned(txCtx, tx, ownerId, propertyId); err != nil {
+			return err
+		}
+		if err := ensureImageCapacity(txCtx, tx.PropertyImage, propertyId); err != nil {
 			return err
 		}
 
@@ -228,6 +242,22 @@ func (rep *PropertyImageRepository) imageOwnershipVerdict(ctx context.Context, i
 		server_error.NotFound("IMAGE_NOT_FOUND", "image not found"),
 		server_error.Forbidden("ACCESS_DENIED", "you can only modify images of your own properties"),
 	)
+}
+
+// ensureImageCapacity fails with IMAGE_LIMIT_REACHED when the property already
+// holds MaxImagesPerProperty images.
+func ensureImageCapacity(ctx context.Context, images *client.PropertyImageClient, propertyId models.RecordId) error {
+	count, err := images.Query().
+		Where(propertyimage.PropertyIDEQ(int(propertyId))).
+		Count(ctx)
+	if err != nil {
+		return server_error.Wrap("IMAGE_QUERY", "failed to count property images", err)
+	}
+	if count >= MaxImagesPerProperty {
+		return server_error.Invalid("IMAGE_LIMIT_REACHED",
+			fmt.Sprintf("a property can have at most %d images", MaxImagesPerProperty))
+	}
+	return nil
 }
 
 func nextDisplayOrder(ctx context.Context, tx *client.Tx, propertyId models.RecordId) (int, error) {

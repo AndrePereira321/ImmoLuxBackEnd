@@ -10,11 +10,16 @@ import (
 	"immo-lux/internal/models"
 	"immo-lux/internal/server/routes"
 	"immo-lux/internal/server_error"
+	"net/netip"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
 )
 
 const ApiPrefix = "/v1/api"
@@ -41,16 +46,7 @@ func New(serverConfig *config.ServerConfig) (*Server, error) {
 		return nil, server_error.Wrap("SERVER_INIT", "failed initializing database", err)
 	}
 
-	fiberApp := getFiberApp(serverConfig)
-
-	if len(serverConfig.HttpServer().Origins()) > 0 {
-		fiberApp.Use(cors.New(cors.Config{
-			AllowCredentials: true,
-			AllowOrigins:     serverConfig.HttpServer().Origins(),
-			AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
-			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		}))
-	}
+	fiberApp := getFiberApp(serverConfig, serverLogger)
 
 	return &Server{
 		config: serverConfig,
@@ -195,17 +191,127 @@ func (s *Server) Close() []error {
 	return errors
 }
 
-func getFiberApp(serverConfig *config.ServerConfig) *fiber.App {
-	return fiber.New(fiber.Config{
+// getFiberApp builds the Fiber app with its global middleware; routes are added
+// afterwards by RegisterRoutes.
+func getFiberApp(serverConfig *config.ServerConfig, serverLogger *logger.Logger) *fiber.App {
+	fiberConfig := fiber.Config{
 		AppName:     serverConfig.AppConfig().Name(),
 		JSONEncoder: json.Marshal,
 		JSONDecoder: json.Unmarshal,
 		BodyLimit:   10 * 1024 * 1024, // 10 MB
+	}
+
+	// Behind a reverse proxy every request comes from the proxy's address, so the
+	// client IP (used by rate limiting, sessions and auth logs) must come from a
+	// header. Only loopback peers are trusted to set it, and Fiber takes the
+	// rightmost valid untrusted X-Forwarded-For entry, so entries a client
+	// prepends are ignored as long as the proxy adds a plain IP (or overwrites
+	// the header with $remote_addr, the recommended setup).
+	if proxyHeader := serverConfig.HttpServer().ProxyHeader(); proxyHeader != "" {
+		fiberConfig.ProxyHeader = proxyHeader
+		fiberConfig.TrustProxy = true
+		fiberConfig.TrustProxyConfig = fiber.TrustProxyConfig{Loopback: true}
+		fiberConfig.EnableIPValidation = true
+		serverLogger.Info(fmt.Sprintf("Client IPs are read from the %s header set by loopback proxies", proxyHeader))
+	} else if isLoopbackHost(serverConfig.HttpServer().Host()) {
+		serverLogger.Warn("server.proxy_header is not set: if a reverse proxy forwards to this server, every client " +
+			"shares the proxy's IP and one client can exhaust the login rate limit for everyone")
+	}
+
+	fiberApp := fiber.New(fiberConfig)
+
+	// CORS runs first so that every response, including a 429 from the login
+	// limiter below, carries the headers the browser needs to read it.
+	if len(serverConfig.HttpServer().Origins()) > 0 {
+		fiberApp.Use(cors.New(cors.Config{
+			AllowCredentials: true,
+			AllowOrigins:     serverConfig.HttpServer().Origins(),
+			AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
+			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		}))
+	}
+
+	fiberApp.Use(ApiPrefix+"/login", newLoginLimiter(serverLogger))
+
+	return fiberApp
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
+}
+
+const (
+	// LoginRequestLimit caps login requests per client (IP, or IPv6 /64) per
+	// LoginRequestWindow. It is held in memory (per process), so a flood is
+	// rejected before it reaches the database; the database's per-(email, IP)
+	// limit still applies on top.
+	LoginRequestLimit  = 10
+	LoginRequestWindow = time.Minute
+)
+
+func newLoginLimiter(serverLogger *logger.Logger) fiber.Handler {
+	return newLimiter(serverLogger, LoginRequestLimit, LoginRequestWindow)
+}
+
+func newLimiter(serverLogger *logger.Logger, max int, window time.Duration) fiber.Handler {
+	rejections := &rejectionReporter{interval: window, log: serverLogger.Warn}
+	return limiter.New(limiter.Config{
+		Max:          max,
+		Expiration:   window,
+		KeyGenerator: loginLimiterKey,
+		Next: func(ctx fiber.Ctx) bool {
+			return ctx.Method() != fiber.MethodPost
+		},
+		LimitReached: func(ctx fiber.Ctx) error {
+			rejections.record(time.Now(), loginLimiterKey(ctx))
+			apiError := server_error.RateLimited("RATE_LIMIT_EXCEEDED", "Too many login attempts. Try again later.").ToServerAPIError()
+			return ctx.Status(fiber.StatusTooManyRequests).JSON(models.NewServerAPIResponse(false, nil, apiError))
+		},
 	})
 }
 
+// loginLimiterKey buckets IPv6 clients by /64, the block a single subscriber
+// usually gets, so rotating addresses within it does not reset the limit.
+func loginLimiterKey(ctx fiber.Ctx) string {
+	ip := routes.ClientIP(ctx)
+	if addr, err := netip.ParseAddr(ip); err == nil && addr.Is6() {
+		return netip.PrefixFrom(addr, 64).Masked().String()
+	}
+	return ip
+}
+
+// rejectionReporter logs rate-limit rejections at most once per interval, so a
+// flood shows up in the logs without rotating their history away.
+type rejectionReporter struct {
+	mu        sync.Mutex
+	interval  time.Duration
+	log       func(string)
+	lastLog   time.Time
+	unlogged  int
+	firstSeen time.Time
+}
+
+func (r *rejectionReporter) record(now time.Time, key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.unlogged == 0 {
+		r.firstSeen = now
+	}
+	r.unlogged++
+	if !r.lastLog.IsZero() && now.Sub(r.lastLog) < r.interval {
+		return
+	}
+	r.log(fmt.Sprintf("Login rate limit: rejected %d request(s) since %s, latest from %s",
+		r.unlogged, r.firstSeen.Format(time.RFC3339), key))
+	r.lastLog = now
+	r.unlogged = 0
+}
+
 func getServerLogger(serverConfig *config.ServerConfig) (*logger.Logger, error) {
-	level := serverConfig.Logging().ServerLogLevel()
-	dir := serverConfig.Logging().LogDir()
-	return logger.New("SERVER", level, dir)
+	loggingConfig := serverConfig.Logging()
+	return logger.New("SERVER", loggingConfig.ServerLogLevel(), loggingConfig.LogDir(), loggingConfig.LogToConsole())
 }

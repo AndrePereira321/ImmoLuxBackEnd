@@ -38,7 +38,7 @@ func Login(ctx *RouteContext) error {
 		Email:      payload.Email,
 		Password:   payload.Password,
 		RememberMe: payload.RememberMe,
-		IpAddress:  ctx.Ctx().IP(),
+		IpAddress:  ctx.ClientIP(),
 		UserAgent:  ctx.Ctx().Get("User-Agent"),
 	})
 	if err != nil {
@@ -81,7 +81,7 @@ func Logout(ctx *RouteContext) error {
 	// Logout is best-effort: the cookie is cleared and success reported even if
 	// the session row could not be touched.
 	_ = ctx.Db().NewAuthOperations().Logout(
-		ctx.RequestContext(), ctx.GetUserId(), ctx.GetSessionId(), ctx.Ctx().IP(), ctx.Ctx().Get("User-Agent"))
+		ctx.RequestContext(), ctx.GetUserId(), ctx.GetSessionId(), ctx.ClientIP(), ctx.Ctx().Get("User-Agent"))
 
 	clearSessionCookie(ctx.Ctx(), ctx.ServerConfig())
 

@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strconv"
 
 	"immo-lux/internal/config"
@@ -58,8 +59,28 @@ func (route *RouteContext) Ctx() fiber.Ctx {
 	return route.ctx
 }
 
-// RequestContext returns the request-scoped context; database operations run
-// under it so a dropped connection cancels their work.
+// ClientIP is the request's client address; see ClientIP.
+func (route *RouteContext) ClientIP() string {
+	return ClientIP(route.ctx)
+}
+
+// ClientIP normalises the address Fiber resolved (from the TCP peer, or the
+// trusted proxy header): IPv4-mapped IPv6 is unmapped and zones are dropped, so
+// one client always yields the same string and it fits the 45-char ip_address
+// columns. A value that does not parse as an IP falls back to the TCP peer.
+func ClientIP(ctx fiber.Ctx) string {
+	if addr, err := netip.ParseAddr(ctx.IP()); err == nil {
+		return addr.Unmap().WithZone("").String()
+	}
+	if ip := ctx.RequestCtx().RemoteIP(); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+// RequestContext returns the context database operations run under. Fiber v3
+// hands out context.Background() unless one was set with SetContext, so it is
+// not cancelled when the client disconnects.
 func (route *RouteContext) RequestContext() context.Context {
 	return route.ctx.Context()
 }

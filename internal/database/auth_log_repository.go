@@ -3,8 +3,10 @@ package database
 import (
 	"context"
 	"fmt"
+	"immo-lux/internal/database/ent/client/authlog"
 	"immo-lux/internal/models"
 	"immo-lux/internal/server_error"
+	"time"
 )
 
 type AuthLogRepository struct {
@@ -52,4 +54,15 @@ func (rep *AuthLogRepository) LogAuthEvent(ctx context.Context, params LogAuthEv
 	}
 
 	return nil
+}
+
+// DeleteCreatedBefore removes auth log entries recorded before cutoff.
+func (rep *AuthLogRepository) DeleteCreatedBefore(ctx context.Context, cutoff time.Time) (int, error) {
+	count, err := rep.db.client.AuthLog.Delete().
+		Where(authlog.CreatedAtLT(cutoff)).
+		Exec(ctx)
+	if err != nil {
+		return 0, server_error.Wrap("AUTH_LOG_CLEANUP", "failed to delete old auth logs", err)
+	}
+	return count, nil
 }

@@ -131,17 +131,18 @@ func (rep *SessionRepository) RevokeOwnedSession(ctx context.Context, ownerId, s
 	return nil
 }
 
-func (rep *SessionRepository) CleanupExpiredSessions(ctx context.Context) (int, error) {
+// DeleteEndedBefore removes sessions that expired, or were logged out or
+// revoked, before cutoff.
+func (rep *SessionRepository) DeleteEndedBefore(ctx context.Context, cutoff time.Time) (int, error) {
 	count, err := rep.db.client.Session.Delete().
-		Where(session.ExpiresAtLT(time.Now())).
+		Where(session.Or(
+			session.ExpiresAtLT(cutoff),
+			session.InvalidatedAtLT(cutoff),
+		)).
 		Exec(ctx)
-
 	if err != nil {
-		rep.db.Logger().Error(fmt.Sprintf("Failed to cleanup expired sessions: %s", err.Error()))
-		return 0, server_error.Wrap("SESSION_CLEANUP", "failed to cleanup expired sessions", err)
+		return 0, server_error.Wrap("SESSION_CLEANUP", "failed to delete ended sessions", err)
 	}
-
-	rep.db.Logger().Info(fmt.Sprintf("Cleaned up %d expired sessions", count))
 	return count, nil
 }
 

@@ -129,24 +129,16 @@ func (rep *RateLimitRepository) ResetRateLimit(ctx context.Context, email string
 	return nil
 }
 
-func (rep *RateLimitRepository) CleanupExpiredRateLimits(ctx context.Context) (int, error) {
-	oldestRelevant := time.Now().Add(-LoginRateLimitWindow * 2)
-
+// DeleteInactiveBefore removes rate-limit records whose current window started
+// before cutoff. A window is only ever extended by a block (at most
+// LoginRateLimitWindow + LoginBlockDuration after it starts) and attempts after
+// it expire reset window_start, so such a record no longer limits anything.
+func (rep *RateLimitRepository) DeleteInactiveBefore(ctx context.Context, cutoff time.Time) (int, error) {
 	count, err := rep.db.client.RateLimit.Delete().
-		Where(
-			ratelimit.WindowStartLT(oldestRelevant),
-			ratelimit.BlockedUntilIsNil(),
-		).
+		Where(ratelimit.WindowStartLT(cutoff)).
 		Exec(ctx)
-
 	if err != nil {
-		rep.db.Logger().Error(fmt.Sprintf("Failed to cleanup rate limits: %s", err.Error()))
-		return 0, server_error.Wrap("RATE_LIMIT_CLEANUP", "failed to cleanup rate limits", err)
+		return 0, server_error.Wrap("RATE_LIMIT_CLEANUP", "failed to delete old rate limit records", err)
 	}
-
-	if count > 0 {
-		rep.db.Logger().Info(fmt.Sprintf("Cleaned up %d expired rate limit records", count))
-	}
-
 	return count, nil
 }

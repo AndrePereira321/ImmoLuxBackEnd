@@ -105,8 +105,9 @@ func (rep *PropertyRepository) applyFilters(query *client.PropertyQuery, filters
 }
 
 // ensureOwned verifies the property exists and belongs to ownerId, translating
-// the outcome into not-found / forbidden kinds. It runs on tx so the ownership
-// it certifies holds for the rest of the transaction.
+// the outcome into not-found / forbidden kinds. It takes no lock (the verdict
+// holds because publisher_id never changes); use lockOwned when concurrent
+// writers on the same property must be serialised.
 func (rep *PropertyRepository) ensureOwned(ctx context.Context, tx *client.Tx, ownerId, propertyId models.RecordId) error {
 	if !propertyId.IsValid() {
 		return server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
@@ -119,6 +120,30 @@ func (rep *PropertyRepository) ensureOwned(ctx context.Context, tx *client.Tx, o
 		return server_error.Wrap("PROPERTY_QUERY", "failed to check property ownership", err)
 	}
 	if owned {
+		return nil
+	}
+
+	return rep.ownershipVerdict(ctx, func(c context.Context) (bool, error) {
+		return tx.Property.Query().Where(property.IDEQ(int(propertyId))).Exist(c)
+	})
+}
+
+// lockOwned is ensureOwned for writes that must be serialised per property: the
+// owner-predicated update (touching updated_at) holds the property's row lock
+// until tx ends, so concurrent transactions on the same property queue here.
+func (rep *PropertyRepository) lockOwned(ctx context.Context, tx *client.Tx, ownerId, propertyId models.RecordId) error {
+	if !propertyId.IsValid() {
+		return server_error.Invalid("INVALID_PROPERTY_ID", "property ID is invalid")
+	}
+
+	affected, err := tx.Property.Update().
+		Where(property.IDEQ(int(propertyId)), property.PublisherIDEQ(int(ownerId))).
+		SetUpdatedAt(time.Now()).
+		Save(ctx)
+	if err != nil {
+		return server_error.Wrap("PROPERTY_UPDATE", "failed to lock property", err)
+	}
+	if affected > 0 {
 		return nil
 	}
 
@@ -325,7 +350,11 @@ func (rep *PropertyRepository) UpdateProperty(ctx context.Context, ownerId, prop
 // DeleteProperty removes a property ownerId owns together with its images.
 func (rep *PropertyRepository) DeleteProperty(ctx context.Context, ownerId, propertyId models.RecordId) error {
 	return rep.db.WithTransaction(ctx, func(txCtx context.Context, tx *client.Tx) error {
-		if err := rep.ensureOwned(txCtx, tx, ownerId, propertyId); err != nil {
+		// Locking (not just checking) the property makes a concurrent image
+		// upload either finish first, so its image is deleted below, or wait and
+		// then find the property gone, instead of breaking the final delete on
+		// the image foreign key.
+		if err := rep.lockOwned(txCtx, tx, ownerId, propertyId); err != nil {
 			return err
 		}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"immo-lux/internal/server_error"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -55,6 +56,7 @@ type HttpConfig struct {
 	port          uint
 	enablePreFork bool
 	origins       []string
+	proxyHeader   string
 	spaFolder     string
 }
 
@@ -72,6 +74,12 @@ func (s *HttpConfig) EnablePreFork() bool {
 
 func (s *HttpConfig) Origins() []string {
 	return s.origins
+}
+
+// ProxyHeader is the header carrying the client IP when requests arrive through
+// a reverse proxy on loopback (e.g. "X-Forwarded-For"); empty means no proxy.
+func (s *HttpConfig) ProxyHeader() string {
+	return s.proxyHeader
 }
 
 func (s *HttpConfig) SpaFolder() string {
@@ -133,12 +141,17 @@ func (d *DatabaseConfig) ConnectionString() string {
 
 type LoggingConfig struct {
 	logDir           string
+	logToConsole     bool
 	serverLogLevel   string
 	databaseLogLevel string
 }
 
 func (l *LoggingConfig) LogDir() string {
 	return l.logDir
+}
+
+func (l *LoggingConfig) LogToConsole() bool {
+	return l.logToConsole
 }
 
 func (l *LoggingConfig) ServerLogLevel() string {
@@ -233,6 +246,13 @@ func getHttpConfig(v *viper.Viper) (*HttpConfig, error) {
 		httpConfig.origins = origins
 	}
 
+	httpConfig.proxyHeader = strings.TrimSpace(v.GetString("server.proxy_header"))
+	if strings.EqualFold(httpConfig.proxyHeader, "Forwarded") {
+		// RFC 7239 "for=..." syntax is not parsed; every client would silently
+		// fall back to the proxy's address.
+		return nil, server_error.New("CONFIG_PARSER", "server.proxy_header \"Forwarded\" is not supported; use X-Forwarded-For or X-Real-IP")
+	}
+
 	httpConfig.spaFolder = v.GetString("server.spaFolder")
 
 	return &httpConfig, nil
@@ -241,7 +261,28 @@ func getHttpConfig(v *viper.Viper) (*HttpConfig, error) {
 func getLoggingConfig(v *viper.Viper) (*LoggingConfig, error) {
 	loggingConfig := LoggingConfig{}
 
-	loggingConfig.logDir = v.GetString("logging.log_dir")
+	loggingConfig.logDir = strings.TrimSpace(v.GetString("logging.log_dir"))
+
+	// Parsed strictly: viper's GetBool turns any unparseable value ("yes", "on")
+	// into false, which would silently switch console logging off.
+	loggingConfig.logToConsole = true
+	if v.IsSet("logging.log_to_console") {
+		switch value := v.Get("logging.log_to_console").(type) {
+		case bool:
+			loggingConfig.logToConsole = value
+		case string:
+			parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+			if err != nil {
+				return nil, server_error.New("CONFIG_PARSER", fmt.Sprintf("logging.log_to_console must be true or false, got %q", value))
+			}
+			loggingConfig.logToConsole = parsed
+		default:
+			return nil, server_error.New("CONFIG_PARSER", fmt.Sprintf("logging.log_to_console must be true or false, got %v", value))
+		}
+	}
+	if !loggingConfig.logToConsole && len(loggingConfig.logDir) == 0 {
+		return nil, server_error.New("CONFIG_PARSER", "logging.log_to_console is disabled but logging.log_dir is empty")
+	}
 
 	loggingConfig.serverLogLevel = v.GetString("logging.server_log_level")
 	if len(loggingConfig.serverLogLevel) == 0 {

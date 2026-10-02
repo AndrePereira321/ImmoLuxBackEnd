@@ -15,9 +15,9 @@ type Logger struct {
 	lumber *lumberjack.Logger
 }
 
-func New(name, level, logDir string) (*Logger, error) {
+func New(name, level, logDir string, logToConsole bool) (*Logger, error) {
 	logLevel := getLogLevel(level)
-	writer, lumber, err := getLogWriter(name, logDir)
+	writer, lumber, err := getLogWriter(name, logDir, logToConsole)
 	if err != nil {
 		return nil, err
 	}
@@ -97,12 +97,15 @@ func getLogLevel(level string) zerolog.Level {
 	return zerolog.InfoLevel
 }
 
-func getLogWriter(name, logDir string) (io.Writer, *lumberjack.Logger, error) {
+func getLogWriter(name, logDir string, logToConsole bool) (io.Writer, *lumberjack.Logger, error) {
 	var lumber *lumberjack.Logger
+	var writers []io.Writer
 
-	consoleWriter := zerolog.ConsoleWriter{
-		Out:        os.Stdout,
-		TimeFormat: time.RFC3339Nano,
+	if logToConsole {
+		writers = append(writers, zerolog.ConsoleWriter{
+			Out:        os.Stdout,
+			TimeFormat: time.RFC3339Nano,
+		})
 	}
 
 	if len(logDir) > 0 {
@@ -111,13 +114,28 @@ func getLogWriter(name, logDir string) (io.Writer, *lumberjack.Logger, error) {
 		}
 		lumber = &lumberjack.Logger{
 			Filename:   filepath.Join(logDir, name+".log"),
-			MaxSize:    10,
+			MaxSize:    25,
 			MaxBackups: 30,
 			MaxAge:     45,
 			Compress:   true,
 		}
-		return io.MultiWriter(consoleWriter, lumber), lumber, nil
+		// lumberjack opens the file lazily on the first write. When the file is
+		// the only output, open it now so an unwritable file fails startup
+		// instead of silently dropping every log line.
+		if !logToConsole {
+			if _, err := lumber.Write(nil); err != nil {
+				return nil, nil, server_error.Wrap("LOG_INIT", "error opening log file", err)
+			}
+		}
+		writers = append(writers, lumber)
 	}
 
-	return consoleWriter, nil, nil
+	if len(writers) == 0 {
+		return nil, nil, server_error.New("LOG_INIT", "no log output: console disabled and no log directory")
+	}
+	if len(writers) == 1 {
+		return writers[0], lumber, nil
+	}
+	// Unlike io.MultiWriter, this keeps writing to the file when stdout fails.
+	return zerolog.MultiLevelWriter(writers...), lumber, nil
 }

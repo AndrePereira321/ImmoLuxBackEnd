@@ -4,14 +4,22 @@ version="1.0.0-alpha"
 
 [server]
 host = "localhost"
-port = 8080
+port = 8082
 enable_pre_fork = false
 origin="https://immolux.pt"
+# Header with the client IP when a reverse proxy on this host forwards requests, e.g. "X-Forwarded-For".
+# Have the proxy overwrite it (nginx: proxy_set_header X-Forwarded-For $remote_addr;). Required behind a
+# proxy: without it every client shares the proxy's IP for login rate limiting. Leave empty for direct connections.
+proxy_header=""
 
 [logging]
-server_log_level="TRACE"
-database_log_level="TRACE"
+# trace | debug | info | warn | error | disabled. Use debug/trace only for development:
+# they log every rejected request and failed-login emails.
+server_log_level="INFO"
+database_log_level="INFO"
 log_dir="./logs"
+# Set to false under systemd so logs are written only to the rotated files in log_dir, not to the journal
+log_to_console=true
 
 [security]
 jwt_secret = "your-super-secret-jwt-key-change-in-production-min-32-chars"
