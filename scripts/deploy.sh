@@ -101,16 +101,25 @@ check_node_version() {
     fi
 }
 
-# go.mod requires go 1.25+
+# Keep in sync with the `go` directive in go.mod. An older local Go would
+# otherwise download the toolchain at build time (or fail with GOTOOLCHAIN=local).
+REQUIRED_GO_VERSION="1.27.1"
+
+# version_ge A B — true when dotted version A >= B
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
 check_go_version() {
-    local version major minor
-    version=$(go version | awk '{print $3}' | sed 's/go//')
-    major=$(echo "$version" | cut -d. -f1)
-    minor=$(echo "$version" | cut -d. -f2)
-    if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 25 ]; }; then
+    local version
+    version=$(go version | awk '{print $3}' | sed 's/^go//')
+    if version_ge "$version" "$REQUIRED_GO_VERSION"; then
         log_info "Go version check passed: $version"
     else
-        log_error "Go 1.25+ is required. Current version: $version"
+        log_error "Go $REQUIRED_GO_VERSION+ is required. Current version: $version"
+        log_info "Replace the old Go install with the official tarball:"
+        log_info "  curl -fsSL https://go.dev/dl/go$REQUIRED_GO_VERSION.linux-amd64.tar.gz -o /tmp/go.tgz"
+        log_info "  sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tgz"
         exit 1
     fi
 }

@@ -97,8 +97,8 @@ type PropertyFacetsDTO struct {
 
 // LocationStatsDTO is returned by GET /v1/api/locations/stats
 type LocationStatsDTO struct {
-	District       string  `json:"district"`             // Canonical district name, e.g. "Lisboa"
-	Municipality   *string `json:"municipality"`          // Canonical municipality name, nil for district-level
+	District       string  `json:"district"`     // Canonical district name, e.g. "Lisboa"
+	Municipality   *string `json:"municipality"` // Canonical municipality name, nil for district-level
 	Total          int     `json:"total"`
 	MinPrice       float64 `json:"minPrice"`
 	MaxPrice       float64 `json:"maxPrice"`

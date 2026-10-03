@@ -17,8 +17,9 @@ go test ./internal/utils/...                       # Single package
 go test ./internal/utils -run '^TestSlugify$' -v   # Single test
 IMMOLUX_TEST_DATABASE_URL='postgres://user:pass@localhost:5432/immolux_test?sslmode=disable' go test ./...
 
-# Dependencies
-go mod tidy
+# Dependencies — run `go generate` after tidy: tidy drops the go.sum entries of
+# the Ent code generator, which deploy.sh's `go generate` would re-add on the server
+go get -u ./... && go mod tidy
 
 # Regenerate Ent ORM code (run after any schema change)
 go generate ./internal/database/ent
@@ -26,7 +27,7 @@ go generate ./internal/database/ent
 
 There are two sets of integration tests: store-level ones in `internal/database` (`newTestDatabase` in `testdb_test.go`) and end-to-end HTTP ones in `internal/server/integration_test.go`, which run the real server — middleware, routes and stores — on a loopback listener. Both migrate and **truncate every table** of the database they connect to, so they refuse to run unless the database name (or, for the store tests only, the `search_path` schema) contains the word `test`, e.g. `immolux_test`. Use a dedicated database (the app user needs `CREATEDB`, or create it as a superuser with `OWNER` set to the app user). Because `go test ./...` runs packages in parallel, every such test holds a PostgreSQL advisory lock (`testDatabaseLockKey`, same value in both packages) for its duration. Unit tests in `internal/server/server_test.go` cover the limiter and client-IP resolution without a database, using `app.Test` (fake peer `0.0.0.0`, never trusted) and a real `127.0.0.1` listener (trusted loopback).
 
-**Local setup:** requires a PostgreSQL database. Copy `configs/config.toml.template` → `configs/config.toml` and `configs/standardUserList.json.template` → `configs/standardUserList.json` (both gitignored). For local development set `origin = "http://localhost:8080"` (the front end's dev server, `../immo-lux-front-end`); keep `port = 8082`, which the front end and `deploy.sh` expect.
+**Local setup:** requires Go 1.27.1+ (the `go` directive in `go.mod`) and PostgreSQL (developed and tested on 18). Copy `configs/config.toml.template` → `configs/config.toml` and `configs/standardUserList.json.template` → `configs/standardUserList.json` (both gitignored). For local development set `origin = "http://localhost:8080"` (the front end's dev server, `../immo-lux-front-end`); keep `port = 8082`, which the front end and `deploy.sh` expect.
 
 ## Architecture
 
@@ -212,6 +213,10 @@ Config is TOML loaded via Viper. All `ServerConfig` fields are private with publ
 ## Deployment
 
 `scripts/deploy.sh` deploys **both** this repo and the front end on the server: `$PROJECT_ROOT` (default `/opt/immolux`) with `backend/` and `frontend/` clones. It pulls each with `--ff-only`, regenerates Ent code, builds `immo-lux-server` (`go build ./internal`) and the SvelteKit `adapter-node` front end, then restarts the `immolux` and `immolux-frontend` systemd services, health-checking `http://127.0.0.1:8082/v1/api/ping` in between. Flags: `--backend-only`, `--frontend-only`, `--skip-restart`, `--force-install`. The production backend must therefore listen on 8082.
+
+For the backend the server needs Go ≥ the `go` directive in `go.mod` (1.27.1). `deploy.sh` checks it against `REQUIRED_GO_VERSION` — bump both together — and, when the server's Go is older, prints the commands that replace `/usr/local/go` with the go.dev tarball.
+
+PostgreSQL 18 is the target in production as in development. To move the server's cluster to a new major on Debian/Ubuntu: install `postgresql-18`, stop `immolux`, run `pg_upgradecluster <old> main` (it keeps port 5432 for the new cluster, so `config.toml` needs no change), start `immolux` and check it, then `pg_dropcluster <old> main` and purge the old `postgresql-<old>` packages.
 
 For the front end the server needs Node `^22.13 || >=24` (the front end's `.npmrc` sets `engine-strict`, so an older Node fails `npm ci`); `deploy.sh` aborts below that and warns when npm is older than 12, because only npm 12 honours the front end's `package.json` `allowScripts` install-script policy. The recommended setup is Node 26 + npm 12 (NodeSource `setup_26.x`, then `npm install -g npm@12`).
 
