@@ -22,7 +22,7 @@
 #
 # Environment overrides:
 #   PROJECT_ROOT         (default /opt/immolux)
-#   BACKEND_HEALTH_URL   (default http://127.0.0.1:8082/v1/api/ping)
+#   BACKEND_HEALTH_URL   (default http://127.0.0.1:8101/v1/api/ping)
 ################################################################################
 
 set -Eeuo pipefail
@@ -41,7 +41,9 @@ FRONTEND_DIR="$PROJECT_ROOT/frontend"
 SERVICE_NAME="immolux"
 FRONTEND_SERVICE_NAME="immolux-frontend"
 BACKEND_BINARY="immo-lux-server"
-BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8082/v1/api/ping}"
+# Production ports: back end 8101 (config.toml), front end 8100 (systemd unit).
+# Local development keeps 8082 / 8080.
+BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8101/v1/api/ping}"
 
 SKIP_RESTART=false
 DO_BACKEND=true
