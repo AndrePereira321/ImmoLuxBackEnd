@@ -76,19 +76,28 @@ check_command() {
     fi
 }
 
-# Frontend toolchain (Vite 8 / vite-imagetools 10) requires Node ^22.12 || >=24
+# Frontend toolchain (ESLint 10, vite-imagetools 12) requires Node ^22.13 || >=24;
+# .npmrc sets engine-strict, so an older Node makes `npm ci` fail.
+# Recommended: Node 26 + npm 12. npm < 12 ignores the front end's package.json
+# `allowScripts` policy and runs every dependency install script.
 check_node_version() {
-    local major minor
+    local major minor npm_major
     major=$(node --version | sed 's/v//' | cut -d. -f1)
     minor=$(node --version | sed 's/v//' | cut -d. -f2)
-    if [ "$major" -ge 24 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }; then
+    if [ "$major" -ge 24 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 13 ]; }; then
         log_info "Node.js version check passed: $(node --version)"
     else
-        log_error "Node.js 22.12+ (or 24+) is required. Current version: $(node --version)"
-        log_info "Install Node 22:"
-        log_info "  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
+        log_error "Node.js 22.13+ (or 24+) is required. Current version: $(node --version)"
+        log_info "Install Node 26 and npm 12:"
+        log_info "  curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash -"
         log_info "  sudo apt install -y nodejs"
+        log_info "  sudo npm install -g npm@12"
         exit 1
+    fi
+
+    npm_major=$(npm --version | cut -d. -f1)
+    if [ "$npm_major" -lt 12 ]; then
+        log_warning "npm $(npm --version) ignores package.json allowScripts — upgrade with: sudo npm install -g npm@12"
     fi
 }
 
