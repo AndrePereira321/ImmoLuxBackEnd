@@ -41,6 +41,9 @@ FRONTEND_DIR="$PROJECT_ROOT/frontend"
 SERVICE_NAME="immolux"
 FRONTEND_SERVICE_NAME="immolux-frontend"
 BACKEND_BINARY="immo-lux-server"
+# The back end's log in production ([logging].log_dir in the server's
+# config.toml), owned by the immolux user: reading it needs sudo.
+BACKEND_LOG="/var/log/immolux/SERVER.log"
 # Production ports: back end 8101 (config.toml), front end 8100 (systemd unit).
 # Local development keeps 8082 / 8080.
 BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8101/v1/api/ping}"
@@ -392,7 +395,7 @@ summary() {
     echo ""
 
     log_info "Useful commands:"
-    log_info "  Backend logs:     tail -f $BACKEND_DIR/logs/SERVER.log"
+    log_info "  Backend logs:     sudo tail -f $BACKEND_LOG"
     log_info "  Backend status:   sudo systemctl status $SERVICE_NAME"
     log_info "  Frontend status:  sudo systemctl status $FRONTEND_SERVICE_NAME"
     log_info "  Restart all:      sudo systemctl restart $SERVICE_NAME $FRONTEND_SERVICE_NAME"

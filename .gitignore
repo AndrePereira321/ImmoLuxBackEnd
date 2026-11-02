@@ -8,6 +8,10 @@
 *.so
 *.dylib
 
+# The back end as scripts/deploy.sh builds it on the server, and its staging copy
+/immo-lux-server
+/immo-lux-server.new
+
 # Test binary, built with `go test -c`
 *.test
 
